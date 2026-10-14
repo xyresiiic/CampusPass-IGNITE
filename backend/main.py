@@ -408,16 +408,16 @@ def seed_demo_users():
             "role": demo["role"],
             "pin_salt": salt,
             "pin_hash": hash_pin(demo["pin"], salt),
-            "is_active": False,
+            "is_active": True,
         }).execute()
 
 
 def enforce_demo_accounts_disabled():
-    """Keep known demo accounts disabled in production."""
+    """Keep known unused admin demo accounts disabled in production."""
 
     assert supabase is not None
 
-    demo_ids = ["ADM001", "STF001"]
+    demo_ids = ["ADM001"]
 
     for demo_id in demo_ids:
         try:
@@ -457,6 +457,12 @@ async def lifespan(app: FastAPI):
         seed_demo_users()
     else:
         enforce_demo_accounts_disabled()
+
+    # Ensure STF001 is active
+    try:
+        supabase.table("staff_users").update({"is_active": True}).eq("staff_id", "STF001").execute()
+    except Exception as error:
+        print(f"Notice: unable to ensure STF001 is active: {error}")
 
     # Verify at least one active administrator exists to avoid lockout
     admin_check = (
