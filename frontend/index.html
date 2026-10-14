@@ -2,9 +2,60 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>frontend</title>
+    <title>CampusPass | Smart Campus Attendance</title>
+    <meta
+      name="description"
+      content="Smart, high-assurance campus attendance system with secure PIN authentication, 3D face verification, and GPS geofenced check-in."
+    />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f8fafc" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#090e1a" />
+
+    <!-- Open Graph & Social Cards -->
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="CampusPass | Smart Campus Attendance" />
+    <meta
+      property="og:description"
+      content="Smart, high-assurance campus attendance system with secure PIN authentication, 3D face verification, and GPS geofenced check-in."
+    />
+    <meta property="og:site_name" content="CampusPass" />
+    <meta property="og:image" content="/favicon.svg" />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="CampusPass | Smart Campus Attendance" />
+    <meta
+      name="twitter:description"
+      content="Smart, high-assurance campus attendance system with secure PIN authentication, 3D face verification, and GPS geofenced check-in."
+    />
+
+    <!-- Favicon & Touch Icon -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/favicon.svg" />
+
+    <!-- Fonts: Space Grotesk (display) and Inter (body) with Preconnect -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap"
+      rel="stylesheet"
+    />
+
+    <!-- Early Theme Detection to prevent flash of wrong theme -->
+    <script>
+      (function() {
+        try {
+          var saved = localStorage.getItem("campuspass_theme");
+          if (saved === "dark" || saved === "light") {
+            document.documentElement.setAttribute("data-theme", saved);
+          } else if (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) {
+            document.documentElement.setAttribute("data-theme", "dark");
+          } else {
+            document.documentElement.setAttribute("data-theme", "light");
+          }
+        } catch (e) {
+          /* localStorage access restricted */
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
