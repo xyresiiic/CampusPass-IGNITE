@@ -1957,3 +1957,176 @@ tbody td[colspan] {
   color: var(--text);
   line-height: 1.5;
 }
+
+/* ======================================
+   PHASE 4 — Absence Alerts & Holidays
+====================================== */
+
+.absence-alert-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 8px 0;
+}
+
+.absence-alert-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--red);
+  border-radius: 12px;
+  padding: 18px 20px;
+  transition: box-shadow 0.2s ease, transform 0.15s ease;
+}
+
+.absence-alert-card:hover {
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+  transform: translateY(-1px);
+}
+
+.absence-alert-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.absence-alert-info {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.absence-alert-info strong {
+  font-size: 16px;
+}
+
+.absence-alert-badge {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  background: linear-gradient(135deg, #fee2e2, #fecaca);
+  border-radius: 12px;
+  padding: 10px 18px;
+  min-width: 70px;
+  flex-shrink: 0;
+}
+
+.absence-days-count {
+  font-size: 28px;
+  font-weight: 800;
+  color: var(--red);
+  line-height: 1;
+}
+
+.absence-days-label {
+  font-size: 11px;
+  color: var(--red);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.absence-alert-meta {
+  margin-top: 8px;
+}
+
+.absence-alert-actions {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.whatsapp-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 18px;
+  background: linear-gradient(135deg, #25d366, #128c7e);
+  color: #fff;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+  transition: opacity 0.2s ease, transform 0.15s ease, box-shadow 0.2s ease;
+  box-shadow: 0 2px 8px rgba(37, 211, 102, 0.25);
+}
+
+.whatsapp-button:hover {
+  opacity: 0.9;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(37, 211, 102, 0.35);
+}
+
+.whatsapp-button:active {
+  transform: scale(0.97);
+}
+
+/* Holiday manager */
+
+.holiday-add-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-top: 14px;
+}
+
+.holiday-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.holiday-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--muted-bg, #f3f4f6);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  transition: background 0.15s ease;
+}
+
+.holiday-chip:hover {
+  background: #e8e8ec;
+}
+
+.holiday-remove-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--red);
+  font-size: 14px;
+  font-weight: 700;
+  padding: 0 2px;
+  line-height: 1;
+  opacity: 0.7;
+  transition: opacity 0.15s ease;
+}
+
+.holiday-remove-btn:hover {
+  opacity: 1;
+}
+
+@media (max-width: 640px) {
+  .absence-alert-top {
+    flex-direction: column;
+    gap: 12px;
+  }
+  .absence-alert-badge {
+    flex-direction: row;
+    gap: 8px;
+    padding: 8px 14px;
+    width: fit-content;
+  }
+  .holiday-add-form {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+

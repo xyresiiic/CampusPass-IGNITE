@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import "./App.css";
 
 type Screen = "login" | "verify" | "admin";
-type AdminSection = "overview" | "staff" | "history" | "requests" | "audit" | "notifications";
+type AdminSection = "overview" | "staff" | "history" | "requests" | "audit" | "notifications" | "alerts";
 type AttendanceAction = "check-in" | "check-out";
 
 type LeaveRequest = {
@@ -72,7 +72,22 @@ type StaffAccount = {
   staff_id: string;
   role: string;
   is_active: boolean;
+  full_name?: string | null;
+  phone?: string | null;
   created_at?: string;
+};
+
+type AbsenceAlert = {
+  staff_id: string;
+  full_name: string;
+  phone: string;
+  consecutive_absent_days: number;
+  absent_since: string | null;
+};
+
+type Holiday = {
+  holiday_date: string;
+  description?: string | null;
 };
 
 type HistoryStatus = "all" | "present" | "absent" | "checked_in";
@@ -335,6 +350,8 @@ function App() {
 
   const [newStaffId, setNewStaffId] = useState("");
   const [newStaffPin, setNewStaffPin] = useState("");
+  const [newStaffFullName, setNewStaffFullName] = useState("");
+  const [newStaffPhone, setNewStaffPhone] = useState("");
   const [resetStaffId, setResetStaffId] = useState("");
   const [resetPin, setResetPin] = useState("");
 
@@ -375,12 +392,23 @@ function App() {
   const [notifLoading, setNotifLoading] = useState(false);
   const [markingRead, setMarkingRead] = useState(false);
 
-  // Phase 1 — Audit logs
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [auditLoading, setAuditLoading] = useState(false);
   const [auditError, setAuditError] = useState("");
   const [auditFilterAction, setAuditFilterAction] = useState("");
   const [auditFilterActor, setAuditFilterActor] = useState("");
+
+  // Phase 4 — Absence alerts & holidays
+  const [absenceAlerts, setAbsenceAlerts] = useState<AbsenceAlert[]>([]);
+  const [absenceLoading, setAbsenceLoading] = useState(false);
+  const [absenceError, setAbsenceError] = useState("");
+  const [absenceThreshold, setAbsenceThreshold] = useState(2);
+  const [holidays, setHolidays] = useState<Holiday[]>([]);
+  const [holidaysLoading, setHolidaysLoading] = useState(false);
+  const [newHolidayDate, setNewHolidayDate] = useState("");
+  const [newHolidayDesc, setNewHolidayDesc] = useState("");
+  const [holidayBusy, setHolidayBusy] = useState(false);
+  const [holidayMessage, setHolidayMessage] = useState("");
 
   async function checkBackend() {
     try {
@@ -480,6 +508,88 @@ function App() {
     } finally {
       setAuditLoading(false);
     }
+  }
+
+  // Phase 4 — Absence alerts helpers
+  async function loadAbsenceAlerts(token: string) {
+    setAbsenceLoading(true);
+    setAbsenceError("");
+    try {
+      const res = await fetch(`${API_URL}/admin/absence-alerts`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Failed to load absence alerts.");
+      setAbsenceAlerts(Array.isArray(data.alerts) ? data.alerts : []);
+      setAbsenceThreshold(typeof data.threshold_days === "number" ? data.threshold_days : 2);
+    } catch (e) {
+      setAbsenceError(e instanceof Error ? e.message : "Failed to load absence alerts.");
+    } finally {
+      setAbsenceLoading(false);
+    }
+  }
+
+  async function loadHolidays(token: string) {
+    setHolidaysLoading(true);
+    try {
+      const res = await fetch(`${API_URL}/admin/holidays`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (res.ok && Array.isArray(data.holidays)) {
+        setHolidays(
+          data.holidays.map((item: any) =>
+            typeof item === "string"
+              ? { holiday_date: item, description: "" }
+              : { holiday_date: item.holiday_date, description: item.description || "" }
+          )
+        );
+      }
+    } catch { /* silent */ }
+    finally { setHolidaysLoading(false); }
+  }
+
+  async function handleAddHoliday(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!newHolidayDate || !accessToken || holidayBusy) return;
+    setHolidayBusy(true);
+    setHolidayMessage("");
+    try {
+      const res = await fetch(`${API_URL}/admin/holidays`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+        body: JSON.stringify({ holiday_date: newHolidayDate, description: newHolidayDesc }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Failed to add holiday.");
+      setHolidayMessage("Holiday added.");
+      setNewHolidayDate("");
+      setNewHolidayDesc("");
+      await loadHolidays(accessToken);
+    } catch (e) {
+      setHolidayMessage(e instanceof Error ? e.message : "Failed.");
+    } finally {
+      setHolidayBusy(false);
+    }
+  }
+
+  async function handleDeleteHoliday(dateStr: string) {
+    if (!accessToken) return;
+    try {
+      await fetch(`${API_URL}/admin/holidays/${encodeURIComponent(dateStr)}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      setHolidays((prev) => prev.filter((h) => h.holiday_date !== dateStr));
+    } catch { /* silent */ }
+  }
+
+  function buildWhatsAppUrl(phone: string, name: string, days: number): string {
+    // Strip non-numeric chars and ensure country code (default +91 India)
+    const digits = phone.replace(/\D/g, "");
+    const number = digits.startsWith("91") ? digits : digits.startsWith("0") ? `91${digits.slice(1)}` : `91${digits}`;
+    const msg = `Hello ${name},\n\nOur CampusPass attendance records show that you have been absent for ${days} consecutive working days. If you have approved leave or authorised campus duty, or believe your attendance record is incorrect, please contact the college administration.\n\nRegards,\nCampusPass Administration`;
+    return `https://wa.me/${number}?text=${encodeURIComponent(msg)}`;
   }
 
   async function loadAdminRequests(token: string) {
@@ -1185,7 +1295,7 @@ function App() {
           "Content-Type": "application/json",
           Authorization: `Bearer ${accessToken}`,
         },
-        body: JSON.stringify({ staff_id: cleanId, pin: newStaffPin }),
+        body: JSON.stringify({ staff_id: cleanId, pin: newStaffPin, full_name: newStaffFullName.trim() || null, phone: newStaffPhone.trim() || null }),
       });
 
       const data = await response.json();
@@ -1201,6 +1311,8 @@ function App() {
       setStaffMessage(`Staff account ${cleanId} created successfully.`);
       setNewStaffId("");
       setNewStaffPin("");
+      setNewStaffFullName("");
+      setNewStaffPhone("");
 
       await loadStaff(accessToken);
       await loadAdminDashboard(accessToken);
@@ -1463,6 +1575,15 @@ function App() {
     setAuditError("");
     setAuditFilterAction("");
     setAuditFilterActor("");
+    // Phase 4 reset
+    setAbsenceAlerts([]);
+    setAbsenceError("");
+    setHolidays([]);
+    setNewHolidayDate("");
+    setNewHolidayDesc("");
+    setHolidayMessage("");
+    setNewStaffFullName("");
+    setNewStaffPhone("");
     setScreen("login");
   }
 
@@ -1485,6 +1606,7 @@ function App() {
     requests: "Leave & duty requests",
     audit: "Audit trail",
     notifications: "Notifications",
+    alerts: "Absence alerts",
   };
 
   return (
@@ -1984,6 +2106,27 @@ function App() {
                 <span className="nav-icon">🗂</span>
                 <span>Audit trail</span>
               </button>
+
+              <button
+                type="button"
+                className={`nav-item ${
+                  adminSection === "alerts" ? "active" : ""
+                }`}
+                onClick={() => {
+                  setAdminSection("alerts");
+                  setSidebarOpen(false);
+                  void loadAbsenceAlerts(accessToken);
+                  void loadHolidays(accessToken);
+                }}
+              >
+                <span className="nav-icon">⚠</span>
+                <span>
+                  Absence alerts
+                  {absenceAlerts.length > 0 && (
+                    <span className="notif-badge" style={{ background: "var(--red)" }}>{absenceAlerts.length}</span>
+                  )}
+                </span>
+              </button>
             </nav>
 
             <div className="sidebar-bottom">
@@ -2291,6 +2434,24 @@ function App() {
                       pattern="[0-9]{4,12}"
                       autoComplete="new-password"
                       required
+                    />
+                    <label htmlFor="newStaffFullName">Full Name (optional)</label>
+                    <input
+                      id="newStaffFullName"
+                      value={newStaffFullName}
+                      onChange={(event) => setNewStaffFullName(event.target.value)}
+                      placeholder="e.g. Ravi Kumar"
+                      maxLength={100}
+                    />
+                    <label htmlFor="newStaffPhone">Phone Number (optional)</label>
+                    <input
+                      id="newStaffPhone"
+                      type="tel"
+                      inputMode="numeric"
+                      value={newStaffPhone}
+                      onChange={(event) => setNewStaffPhone(event.target.value)}
+                      placeholder="e.g. 9876543210"
+                      maxLength={15}
                     />
                     <button
                       className="primary-button"
@@ -2913,6 +3074,140 @@ function App() {
                   >
                     ⬇ Attendance CSV
                   </a>
+                </div>
+              </div>
+            )}
+
+            {/* Phase 4: Admin — Absence Alerts */}
+            {adminSection === "alerts" && (
+              <div className="table-card">
+                <div className="admin-heading">
+                  <div>
+                    <span className="eyebrow">STAFF MONITORING</span>
+                    <h2>Absence alerts</h2>
+                    <p className="muted">
+                      Staff members absent for more than {absenceThreshold} consecutive working days.
+                      Weekends, college holidays, and approved leave/duty are excluded.
+                    </p>
+                  </div>
+                  <button
+                    className="outline-button"
+                    type="button"
+                    disabled={absenceLoading}
+                    onClick={() => void loadAbsenceAlerts(accessToken)}
+                  >
+                    {absenceLoading ? "Scanning..." : "↻ Refresh alerts"}
+                  </button>
+                </div>
+
+                {absenceError && <p className="error-message" role="alert">{absenceError}</p>}
+
+                {absenceAlerts.length === 0 && !absenceLoading && !absenceError ? (
+                  <div style={{ padding: "32px", textAlign: "center", color: "var(--muted)" }}>
+                    ✅ No staff members have exceeded the absence threshold. All good!
+                  </div>
+                ) : (
+                  <div className="absence-alert-list">
+                    {absenceAlerts.map((alert) => (
+                      <div key={alert.staff_id} className="absence-alert-card">
+                        <div className="absence-alert-top">
+                          <div className="absence-alert-info">
+                            <strong>{alert.full_name}</strong>
+                            <span className="muted" style={{ fontSize: 13 }}>ID: {alert.staff_id}</span>
+                            {alert.phone && (
+                              <span className="muted" style={{ fontSize: 13 }}>📞 {alert.phone}</span>
+                            )}
+                          </div>
+                          <div className="absence-alert-badge">
+                            <span className="absence-days-count">{alert.consecutive_absent_days}</span>
+                            <span className="absence-days-label">days absent</span>
+                          </div>
+                        </div>
+                        <div className="absence-alert-meta">
+                          {alert.absent_since && (
+                            <span className="muted" style={{ fontSize: 13 }}>
+                              Absent since: <strong>{alert.absent_since}</strong>
+                            </span>
+                          )}
+                        </div>
+                        <div className="absence-alert-actions">
+                          {alert.phone ? (
+                            <a
+                              href={buildWhatsAppUrl(alert.phone, alert.full_name, alert.consecutive_absent_days)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="whatsapp-button"
+                            >
+                              💬 Message on WhatsApp
+                            </a>
+                          ) : (
+                            <span className="muted" style={{ fontSize: 12 }}>
+                              No phone number saved — add it in Staff management
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* College Holidays Manager */}
+                <div style={{ marginTop: 32, paddingTop: 24, borderTop: "1px solid var(--border)" }}>
+                  <div className="admin-heading">
+                    <div>
+                      <span className="eyebrow">HOLIDAY CALENDAR</span>
+                      <h3 style={{ margin: 0 }}>College holidays</h3>
+                      <p className="muted" style={{ marginTop: 4 }}>
+                        Days listed here are excluded from absence calculations.
+                      </p>
+                    </div>
+                  </div>
+
+                  <form className="holiday-add-form" onSubmit={handleAddHoliday}>
+                    <input
+                      type="date"
+                      value={newHolidayDate}
+                      onChange={(e) => setNewHolidayDate(e.target.value)}
+                      required
+                      style={{ fontSize: 14, padding: "8px 12px", borderRadius: 8, border: "1px solid var(--border)" }}
+                    />
+                    <input
+                      type="text"
+                      placeholder="Description (optional)"
+                      value={newHolidayDesc}
+                      onChange={(e) => setNewHolidayDesc(e.target.value)}
+                      style={{ fontSize: 14, padding: "8px 12px", borderRadius: 8, border: "1px solid var(--border)", minWidth: 180 }}
+                    />
+                    <button className="primary-button" type="submit" disabled={holidayBusy || !newHolidayDate}>
+                      {holidayBusy ? "Adding..." : "+ Add holiday"}
+                    </button>
+                  </form>
+
+                  {holidayMessage && <p className="success-message" role="status" style={{ marginTop: 8 }}>{holidayMessage}</p>}
+
+                  {holidays.length > 0 && (
+                    <div className="holiday-list">
+                      {holidays.map((h) => (
+                        <div key={h.holiday_date} className="holiday-chip">
+                          <span>{h.holiday_date}</span>
+                          {h.description && <span className="muted" style={{ fontSize: 12 }}>({h.description})</span>}
+                          <button
+                            type="button"
+                            className="holiday-remove-btn"
+                            title="Remove holiday"
+                            onClick={() => void handleDeleteHoliday(h.holiday_date)}
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {holidays.length === 0 && !holidaysLoading && (
+                    <p className="muted" style={{ fontSize: 13, marginTop: 12 }}>
+                      No college holidays configured for this year.
+                    </p>
+                  )}
                 </div>
               </div>
             )}

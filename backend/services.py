@@ -57,6 +57,22 @@ def _get_sqlite_conn():
                 created_at TEXT NOT NULL
             );
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS staff_profiles (
+                staff_id TEXT PRIMARY KEY,
+                full_name TEXT,
+                phone TEXT,
+                updated_at TEXT NOT NULL
+            );
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS college_holidays (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                holiday_date TEXT NOT NULL UNIQUE,
+                description TEXT,
+                created_at TEXT NOT NULL
+            );
+        """)
     return conn
 
 
@@ -733,3 +749,414 @@ def export_leave_requests_csv(records: list[dict[str, Any]]) -> str:
         ])
 
     return output.getvalue()
+
+
+# ------------------------------------------------------------------------------
+# Phase 4: Absence Alerts & Staff Profile Management
+# ------------------------------------------------------------------------------
+
+def get_staff_profiles_map() -> dict[str, dict[str, Any]]:
+    """Return dict of {staff_id: {'full_name': ..., 'phone': ...}} from local SQLite cache."""
+    try:
+        conn = _get_sqlite_conn()
+        rows = conn.execute("SELECT staff_id, full_name, phone FROM staff_profiles").fetchall()
+        conn.close()
+        return {r["staff_id"]: {"full_name": r["full_name"], "phone": r["phone"]} for r in rows}
+    except Exception:
+        return {}
+
+
+def save_staff_profile(
+    supabase: Optional[Client],
+    staff_id: str,
+    full_name: Optional[str] = None,
+    phone: Optional[str] = None,
+) -> dict[str, Any]:
+    """Save staff profile to local SQLite and attempt Supabase update if columns exist."""
+    normalized_id = staff_id.strip().upper()
+    now_iso = _now_utc_iso()
+
+    # Update local SQLite
+    curr_name = full_name
+    curr_phone = phone
+    try:
+        conn = _get_sqlite_conn()
+        with conn:
+            existing = conn.execute(
+                "SELECT full_name, phone FROM staff_profiles WHERE staff_id = ?",
+                (normalized_id,),
+            ).fetchone()
+            if existing:
+                curr_name = full_name if full_name is not None else existing["full_name"]
+                curr_phone = phone if phone is not None else existing["phone"]
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO staff_profiles (staff_id, full_name, phone, updated_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                (normalized_id, curr_name, curr_phone, now_iso),
+            )
+        conn.close()
+    except Exception as e:
+        print(f"Error saving profile in local DB: {e}")
+
+    # Attempt Supabase update (safe; if columns are absent, it will catch and ignore)
+    if supabase is not None:
+        try:
+            update_payload = {}
+            if full_name is not None:
+                update_payload["full_name"] = full_name.strip() or None
+            if phone is not None:
+                update_payload["phone"] = phone.strip() or None
+            if update_payload:
+                supabase.table("staff_users").update(update_payload).eq("staff_id", normalized_id).execute()
+        except Exception:
+            pass
+
+    return {"staff_id": normalized_id, "full_name": curr_name, "phone": curr_phone}
+
+
+def get_staff_list_with_profiles(supabase: Optional[Client]) -> list[dict[str, Any]]:
+    """Fetch staff users safely and merge with profile names & phone numbers."""
+    profiles = get_staff_profiles_map()
+    staff_list: list[dict[str, Any]] = []
+
+    if supabase is not None:
+        # First attempt: query including full_name, phone (if migration 02 is applied)
+        try:
+            res = (
+                supabase.table("staff_users")
+                .select("staff_id, role, is_active, full_name, phone, created_at")
+                .eq("role", "staff")
+                .order("staff_id")
+                .execute()
+            )
+            data = res.data or []
+            for item in data:
+                sid = item.get("staff_id", "")
+                p = profiles.get(sid, {})
+                if not item.get("full_name") and p.get("full_name"):
+                    item["full_name"] = p["full_name"]
+                if not item.get("phone") and p.get("phone"):
+                    item["phone"] = p["phone"]
+            return data
+        except Exception:
+            # Fall back to base columns that always exist in staff_users
+            try:
+                res = (
+                    supabase.table("staff_users")
+                    .select("staff_id, role, is_active, created_at")
+                    .eq("role", "staff")
+                    .order("staff_id")
+                    .execute()
+                )
+                data = res.data or []
+                for item in data:
+                    sid = item.get("staff_id", "")
+                    p = profiles.get(sid, {})
+                    item["full_name"] = p.get("full_name") or sid
+                    item["phone"] = p.get("phone") or None
+                return data
+            except Exception as e:
+                print(f"Supabase staff fetch error: {e}")
+
+    # Local SQLite fallback
+    try:
+        conn = _get_sqlite_conn()
+        rows = conn.execute(
+            "SELECT staff_id, role, is_active, created_at FROM staff_users WHERE role='staff'"
+        ).fetchall()
+        conn.close()
+        for r in rows:
+            sid = r["staff_id"]
+            p = profiles.get(sid, {})
+            staff_list.append({
+                "staff_id": sid,
+                "role": r["role"],
+                "is_active": bool(r["is_active"]),
+                "full_name": p.get("full_name") or sid,
+                "phone": p.get("phone") or None,
+                "created_at": r["created_at"],
+            })
+    except Exception:
+        pass
+    return staff_list
+
+
+def _is_working_day(d: "date_type", holiday_dates: set) -> bool:
+    """Return True if d is Mon–Fri and not a college holiday."""
+    return d.weekday() < 5 and d not in holiday_dates
+
+
+def get_college_holidays(supabase: Optional[Client], year: int) -> set:
+    """Return a set of date objects for all holidays in the given year."""
+    from datetime import date as DT
+    holidays: set = set()
+
+    if supabase is not None:
+        try:
+            start = f"{year}-01-01"
+            end   = f"{year}-12-31"
+            res = (
+                supabase.table("college_holidays")
+                .select("holiday_date")
+                .gte("holiday_date", start)
+                .lte("holiday_date", end)
+                .execute()
+            )
+            for row in (res.data or []):
+                try:
+                    holidays.add(DT.fromisoformat(row["holiday_date"]))
+                except Exception:
+                    pass
+            if holidays:
+                return holidays
+        except Exception:
+            pass
+
+    # Local SQLite fallback
+    try:
+        conn = _get_sqlite_conn()
+        rows = conn.execute(
+            "SELECT holiday_date FROM college_holidays WHERE holiday_date BETWEEN ? AND ?",
+            (f"{year}-01-01", f"{year}-12-31"),
+        ).fetchall()
+        conn.close()
+        for r in rows:
+            try:
+                holidays.add(DT.fromisoformat(r["holiday_date"]))
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return holidays
+
+
+def get_college_holidays_records(supabase: Optional[Client], year: int) -> list[dict[str, Any]]:
+    """Return a list of holiday records for the admin calendar."""
+    holidays_dict: dict[str, str] = {}
+
+    if supabase is not None:
+        try:
+            start = f"{year}-01-01"
+            end   = f"{year}-12-31"
+            res = (
+                supabase.table("college_holidays")
+                .select("holiday_date, description")
+                .gte("holiday_date", start)
+                .lte("holiday_date", end)
+                .execute()
+            )
+            for row in (res.data or []):
+                holidays_dict[row["holiday_date"]] = row.get("description") or ""
+        except Exception:
+            pass
+
+    try:
+        conn = _get_sqlite_conn()
+        rows = conn.execute(
+            "SELECT holiday_date, description FROM college_holidays WHERE holiday_date BETWEEN ? AND ?",
+            (f"{year}-01-01", f"{year}-12-31"),
+        ).fetchall()
+        conn.close()
+        for r in rows:
+            if r["holiday_date"] not in holidays_dict:
+                holidays_dict[r["holiday_date"]] = r["description"] or ""
+    except Exception:
+        pass
+
+    return [{"holiday_date": d, "description": desc} for d, desc in sorted(holidays_dict.items())]
+
+
+def add_college_holiday(
+    supabase: Optional[Client],
+    holiday_date: str,
+    description: str = "",
+) -> dict[str, Any]:
+    """Add a holiday. holiday_date must be YYYY-MM-DD."""
+    record = {
+        "holiday_date": holiday_date,
+        "description": description.strip() or None,
+        "created_at": _now_utc_iso(),
+    }
+    if supabase is not None:
+        try:
+            res = supabase.table("college_holidays").upsert(record, on_conflict="holiday_date").execute()
+            if res.data:
+                return res.data[0]
+        except Exception:
+            pass
+    # Local fallback
+    try:
+        conn = _get_sqlite_conn()
+        with conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO college_holidays (holiday_date, description, created_at) VALUES (?,?,?)",
+                (holiday_date, record["description"], record["created_at"]),
+            )
+        conn.close()
+    except Exception as e:
+        raise RuntimeError(f"Could not save holiday: {e}")
+    return record
+
+
+def delete_college_holiday(supabase: Optional[Client], holiday_date: str) -> bool:
+    if supabase is not None:
+        try:
+            supabase.table("college_holidays").delete().eq("holiday_date", holiday_date).execute()
+        except Exception:
+            pass
+    try:
+        conn = _get_sqlite_conn()
+        with conn:
+            conn.execute("DELETE FROM college_holidays WHERE holiday_date = ?", (holiday_date,))
+        conn.close()
+        return True
+    except Exception:
+        return False
+
+
+def get_absence_alerts(
+    supabase: Optional[Client],
+    threshold_days: int = 2,
+    lookback_days: int = 30,
+) -> list[dict[str, Any]]:
+    """
+    Detect active staff who have been absent for *more than* threshold_days
+    consecutive working days ending yesterday (IST).
+
+    Returns a list of alert dicts:
+      { staff_id, full_name, phone, consecutive_absent_days, absent_since }
+    """
+    from datetime import date as DT, timedelta
+
+    today_ist = datetime.now(INDIA_TIMEZONE).date()
+    yesterday = today_ist - timedelta(days=1)
+
+    # Collect all holiday dates across the years covered by lookback
+    holiday_years = {(yesterday - timedelta(days=i)).year for i in range(lookback_days + 5)}
+    holiday_dates: set = set()
+    for yr in holiday_years:
+        holiday_dates |= get_college_holidays(supabase, yr)
+
+    # Build the list of working days to check (newest first, up to lookback_days)
+    working_days = []
+    d = yesterday
+    while len(working_days) < lookback_days:
+        if _is_working_day(d, holiday_dates):
+            working_days.append(d)
+        d -= timedelta(days=1)
+
+    # Fetch all active staff safely (merging profiles)
+    all_staff = get_staff_list_with_profiles(supabase)
+    staff_list = [s for s in all_staff if s.get("is_active", True)]
+
+    # Fetch attendance records for the lookback window
+    window_start = (working_days[-1] if working_days else yesterday).isoformat()
+    window_end   = yesterday.isoformat()
+
+    attendance_by_staff: dict[str, set] = {}  # staff_id -> set of date objects present
+    if supabase is not None:
+        try:
+            res = (
+                supabase.table("attendance")
+                .select("staff_id, check_in")
+                .gte("check_in", window_start)
+                .lte("check_in", window_end + "T23:59:59")
+                .execute()
+            )
+            for row in (res.data or []):
+                sid = row.get("staff_id", "")
+                ci  = row.get("check_in", "")
+                if sid and ci:
+                    try:
+                        d_obj = DT.fromisoformat(ci[:10])
+                        attendance_by_staff.setdefault(sid, set()).add(d_obj)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+    # Fetch approved leave requests in the window
+    approved_leave_by_staff: dict[str, list[tuple]] = {}  # staff_id -> [(start, end), ...]
+    if supabase is not None:
+        try:
+            res = (
+                supabase.table("leave_requests")
+                .select("staff_id, start_date, end_date")
+                .eq("status", "approved")
+                .lte("start_date", window_end)
+                .gte("end_date", window_start)
+                .execute()
+            )
+            for row in (res.data or []):
+                sid = row.get("staff_id", "")
+                if sid:
+                    try:
+                        s = DT.fromisoformat(row["start_date"])
+                        e = DT.fromisoformat(row["end_date"])
+                        approved_leave_by_staff.setdefault(sid, []).append((s, e))
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+    # Check local SQLite for approved leave requests as well
+    try:
+        conn = _get_sqlite_conn()
+        rows = conn.execute(
+            """
+            SELECT staff_id, start_date, end_date FROM leave_requests
+            WHERE status='approved' AND start_date <= ? AND end_date >= ?
+            """,
+            (window_end, window_start),
+        ).fetchall()
+        conn.close()
+        for r in rows:
+            sid = r["staff_id"]
+            if sid:
+                try:
+                    s = DT.fromisoformat(r["start_date"])
+                    e = DT.fromisoformat(r["end_date"])
+                    approved_leave_by_staff.setdefault(sid, []).append((s, e))
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+    def _is_excused(staff_id: str, day: "DT") -> bool:
+        """True if this day is covered by an approved leave/duty."""
+        for (s, e) in approved_leave_by_staff.get(staff_id, []):
+            if s <= day <= e:
+                return True
+        return False
+
+    alerts = []
+    for staff in staff_list:
+        sid = staff.get("staff_id", "")
+        if not sid:
+            continue
+        present_days = attendance_by_staff.get(sid, set())
+
+        # Walk newest-first: count consecutive absent (not present, not excused) working days
+        consecutive = 0
+        absent_since: Optional[str] = None
+        for day in working_days:
+            if day in present_days or _is_excused(sid, day):
+                break  # streak ends
+            consecutive += 1
+            absent_since = day.isoformat()
+
+        if consecutive > threshold_days:
+            alerts.append({
+                "staff_id": sid,
+                "full_name": staff.get("full_name") or sid,
+                "phone": staff.get("phone") or "",
+                "consecutive_absent_days": consecutive,
+                "absent_since": absent_since,
+            })
+
+    # Sort most-absent first
+    alerts.sort(key=lambda x: x["consecutive_absent_days"], reverse=True)
+    return alerts
+

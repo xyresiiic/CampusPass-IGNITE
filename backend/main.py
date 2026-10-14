@@ -1269,6 +1269,8 @@ def admin_dashboard(user: dict = Depends(require_admin)):
 class CreateStaffRequest(BaseModel):
     staff_id: str
     pin: str
+    full_name: str | None = None
+    phone: str | None = None
 
 
 class ResetStaffPinRequest(BaseModel):
@@ -1292,15 +1294,8 @@ def list_staff(user: dict = Depends(require_admin)):
     assert supabase is not None
 
     try:
-        result = (
-            supabase.table("staff_users")
-            .select("staff_id, role, is_active, created_at")
-            .eq("role", "staff")
-            .order("staff_id")
-            .execute()
-        )
-
-        return {"staff": result.data or []}
+        staff = services.get_staff_list_with_profiles(supabase)
+        return {"staff": staff, "total": len(staff)}
 
     except Exception as error:
         print(f"List staff error: {error}")
@@ -1351,13 +1346,32 @@ def create_staff(
 
         salt = secrets.token_hex(16)
 
-        supabase.table("staff_users").insert({
+        base_payload: dict = {
             "staff_id": staff_id,
             "role": "staff",
             "pin_salt": salt,
             "pin_hash": hash_pin(pin, salt),
             "is_active": True,
-        }).execute()
+        }
+        try:
+            insert_payload = dict(base_payload)
+            if data.full_name and data.full_name.strip():
+                insert_payload["full_name"] = data.full_name.strip()
+            if data.phone and data.phone.strip():
+                insert_payload["phone"] = data.phone.strip()
+            supabase.table("staff_users").insert(insert_payload).execute()
+        except Exception:
+            # Fall back to base columns without full_name/phone in Supabase
+            supabase.table("staff_users").insert(base_payload).execute()
+
+        # Safely persist profile locally in SQLite and/or Supabase
+        if (data.full_name and data.full_name.strip()) or (data.phone and data.phone.strip()):
+            services.save_staff_profile(
+                supabase,
+                staff_id=staff_id,
+                full_name=data.full_name,
+                phone=data.phone,
+            )
 
         services.log_audit_event(
             supabase,
@@ -1366,6 +1380,7 @@ def create_staff(
             action="CREATE_STAFF",
             target_type="staff",
             target_id=staff_id,
+            details={"full_name": data.full_name, "phone": data.phone},
         )
 
         return {
@@ -1783,4 +1798,115 @@ def trigger_escalation_check(user: dict = Depends(require_admin)):
         "message": f"Escalation check complete. {len(escalated)} requests escalated.",
         "escalated_count": len(escalated),
         "escalated": escalated,
-    }
+    }
+
+
+# ---------------- PHASE 4: ABSENCE ALERTS ----------------
+
+ABSENCE_THRESHOLD_DAYS = int(os.getenv("ABSENCE_THRESHOLD_DAYS", "2"))
+ABSENCE_LOOKBACK_DAYS  = int(os.getenv("ABSENCE_LOOKBACK_DAYS",  "30"))
+
+
+@app.get("/admin/absence-alerts")
+def get_absence_alerts(user: dict = Depends(require_admin)):
+    """Return list of staff with more than ABSENCE_THRESHOLD_DAYS consecutive absent working days."""
+    alerts = services.get_absence_alerts(
+        supabase,
+        threshold_days=ABSENCE_THRESHOLD_DAYS,
+        lookback_days=ABSENCE_LOOKBACK_DAYS,
+    )
+    return {"total": len(alerts), "alerts": alerts, "threshold_days": ABSENCE_THRESHOLD_DAYS}
+
+
+# -- College Holidays --
+
+class HolidayRequest(BaseModel):
+    holiday_date: str   # YYYY-MM-DD
+    description: str | None = None
+
+
+@app.get("/admin/holidays")
+def list_holidays(
+    year: int = Query(default=None),
+    user: dict = Depends(require_admin),
+):
+    from datetime import datetime as DT
+    yr = year or DT.now().year
+    records = services.get_college_holidays_records(supabase, yr)
+    return {"year": yr, "holidays": records}
+
+
+@app.post("/admin/holidays")
+def add_holiday(
+    data: HolidayRequest,
+    user: dict = Depends(require_admin),
+):
+    try:
+        record = services.add_college_holiday(supabase, data.holiday_date, data.description or "")
+        services.log_audit_event(
+            supabase,
+            actor_id=user["staff_id"],
+            actor_role="admin",
+            action="ADD_HOLIDAY",
+            target_type="holiday",
+            target_id=data.holiday_date,
+        )
+        return {"message": "Holiday added.", "holiday": record}
+    except Exception as error:
+        raise HTTPException(status_code=400, detail=str(error))
+
+
+@app.delete("/admin/holidays/{holiday_date}")
+def remove_holiday(
+    holiday_date: str,
+    user: dict = Depends(require_admin),
+):
+    services.delete_college_holiday(supabase, holiday_date)
+    services.log_audit_event(
+        supabase,
+        actor_id=user["staff_id"],
+        actor_role="admin",
+        action="REMOVE_HOLIDAY",
+        target_type="holiday",
+        target_id=holiday_date,
+    )
+    return {"message": "Holiday removed."}
+
+
+# -- Update staff profile (full_name, phone) --
+
+class UpdateStaffProfileRequest(BaseModel):
+    full_name: str | None = None
+    phone: str | None = None
+
+
+@app.patch("/admin/staff/{staff_id}/profile")
+def update_staff_profile(
+    staff_id: str,
+    data: UpdateStaffProfileRequest,
+    user: dict = Depends(require_admin),
+):
+    assert supabase is not None
+    normalized_id = staff_id.strip().upper()
+    if data.full_name is None and data.phone is None:
+        raise HTTPException(status_code=400, detail="Nothing to update.")
+    try:
+        updated = services.save_staff_profile(
+            supabase,
+            staff_id=normalized_id,
+            full_name=data.full_name,
+            phone=data.phone,
+        )
+        services.log_audit_event(
+            supabase,
+            actor_id=user["staff_id"],
+            actor_role="admin",
+            action="UPDATE_STAFF_PROFILE",
+            target_type="staff",
+            target_id=normalized_id,
+            details={"full_name": data.full_name, "phone": data.phone},
+        )
+        return {"message": "Profile updated.", "staff_id": normalized_id, "profile": updated}
+    except Exception as error:
+        print(f"Update staff profile error: {error}")
+        raise HTTPException(status_code=503, detail="Unable to update profile.")
