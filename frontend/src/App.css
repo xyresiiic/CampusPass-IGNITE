@@ -910,6 +910,11 @@ select:focus-visible {
   --card-tint: #fff0f1;
 }
 
+.stat-amber {
+  --card-color: #d97706;
+  --card-tint: #fef3c7;
+}
+
 /* ======================================
    9. TABLE CARDS
 ====================================== */
@@ -1032,6 +1037,12 @@ tbody td[colspan] {
 .badge.gps-only {
   color: #946619;
   background: #fff4df;
+}
+
+.badge.half-day {
+  color: #b45309;
+  background: #fef3c7;
+  border: 1px solid #fde68a;
 }
 
 /* ======================================

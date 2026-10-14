@@ -4,7 +4,7 @@ import csv
 import json
 import uuid
 import sqlite3
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta, time, date as Date
 from typing import Any, Optional
 from supabase import Client
 
@@ -73,11 +73,123 @@ def _get_sqlite_conn():
                 created_at TEXT NOT NULL
             );
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS attendance_status (
+                attendance_id INTEGER PRIMARY KEY,
+                status TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+        """)
     return conn
 
 
 def _now_utc_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+# ------------------------------------------------------------------------------
+# Half-Day Attendance Calculation & Attendance Status Helpers
+# ------------------------------------------------------------------------------
+
+def determine_attendance_status(
+    check_in_str: Optional[str],
+    check_out_str: Optional[str],
+    stored_status: Optional[str] = None,
+    has_leave: bool = False,
+) -> str:
+    """
+    Evaluates attendance status based on college timings & half-day rule.
+    - Not checked in -> 'absent'
+    - Not checked out yet -> 'checked_in'
+    - If approved leave/duty -> retain normal/excused status, do not overwrite with half_day
+    - If stored_status == 'half_day' and not has_leave -> 'half_day'
+    - Exact Half-Day Rule:
+        Late arrival: check-in strictly after 11:00 AM IST
+        Early departure: check-out strictly before 02:00 PM IST (14:00)
+        Both check-in and check-out must belong to the same local calendar day in Asia/Kolkata
+        Both conditions must be True -> 'half_day'
+        Otherwise -> 'present'
+    """
+    if not check_in_str:
+        return "absent"
+    if not check_out_str:
+        return "checked_in"
+    if has_leave:
+        return stored_status or "present"
+    if stored_status == "half_day":
+        return "half_day"
+
+    try:
+        cin_dt = datetime.fromisoformat(check_in_str.replace("Z", "+00:00")).astimezone(INDIA_TIMEZONE)
+        cout_dt = datetime.fromisoformat(check_out_str.replace("Z", "+00:00")).astimezone(INDIA_TIMEZONE)
+
+        # Apply rule only when both timestamps belong to the same local calendar day
+        if cin_dt.date() == cout_dt.date():
+            is_late_arrival = cin_dt.time() > time(11, 0, 0)
+            is_early_departure = cout_dt.time() < time(14, 0, 0)
+            if is_late_arrival and is_early_departure:
+                return "half_day"
+    except Exception as e:
+        print(f"Error evaluating attendance timestamps: {e}")
+
+    return stored_status or "present"
+
+
+def has_approved_leave_or_duty(supabase: Optional[Client], staff_id: str, check_date: Any) -> bool:
+    """Check if the staff member has an approved leave or duty on this local date."""
+    date_str = check_date.isoformat() if hasattr(check_date, "isoformat") else str(check_date)
+    if supabase is not None:
+        try:
+            res = (
+                supabase.table("leave_requests")
+                .select("id")
+                .eq("staff_id", staff_id)
+                .eq("status", "approved")
+                .lte("start_date", date_str)
+                .gte("end_date", date_str)
+                .limit(1)
+                .execute()
+            )
+            if res.data:
+                return True
+        except Exception:
+            pass
+
+    try:
+        conn = _get_sqlite_conn()
+        row = conn.execute(
+            """
+            SELECT id FROM leave_requests
+            WHERE staff_id = ? AND status = 'approved' AND start_date <= ? AND end_date >= ?
+            LIMIT 1
+            """,
+            (staff_id, date_str, date_str),
+        ).fetchone()
+        conn.close()
+        return bool(row)
+    except Exception:
+        return False
+
+
+def save_attendance_status(supabase: Optional[Client], attendance_id: int, status: str) -> None:
+    """Save attendance status to SQLite and attempt Supabase update if column exists."""
+    now_iso = _now_utc_iso()
+    try:
+        conn = _get_sqlite_conn()
+        with conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO attendance_status (attendance_id, status, updated_at) VALUES (?, ?, ?)",
+                (attendance_id, status, now_iso),
+            )
+        conn.close()
+    except Exception as e:
+        print(f"Error saving attendance status in local DB: {e}")
+
+    if supabase is not None:
+        try:
+            supabase.table("attendance").update({"status": status}).eq("id", attendance_id).execute()
+        except Exception:
+            pass
 
 
 # ------------------------------------------------------------------------------
@@ -665,7 +777,14 @@ def export_attendance_csv(records: list[dict[str, Any]]) -> str:
             except Exception:
                 cout_ist = cout
 
-        status = "Present" if cout else "Checked In (Open)"
+        raw_status = determine_attendance_status(cin, cout, r.get("status"))
+        if raw_status == "half_day":
+            status = "Half Day"
+        elif cout:
+            status = "Present"
+        else:
+            status = "Checked In (Open)"
+
         writer.writerow([
             _sanitize_csv_cell(r.get("id")),
             _sanitize_csv_cell(r.get("staff_id")),

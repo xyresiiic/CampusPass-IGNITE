@@ -48,6 +48,7 @@ type AttendanceRecord = {
   staff_id: string;
   check_in: string;
   check_out: string | null;
+  status?: string | null;
   created_at?: string;
 };
 
@@ -64,6 +65,7 @@ type AdminDashboardData = {
   inactive_staff: number;
   present_today: number;
   absent_today: number;
+  half_day_today?: number;
   currently_checked_in: number;
   recent_attendance: AttendanceRecord[];
 };
@@ -90,11 +92,11 @@ type Holiday = {
   description?: string | null;
 };
 
-type HistoryStatus = "all" | "present" | "absent" | "checked_in";
+type HistoryStatus = "all" | "present" | "half_day" | "absent" | "checked_in";
 
 type AttendanceHistoryRecord = {
   staff_id: string;
-  status: "present" | "absent" | "checked_in";
+  status: "present" | "half_day" | "absent" | "checked_in";
   check_in: string | null;
   check_out: string | null;
 };
@@ -355,6 +357,11 @@ function App() {
   const [resetStaffId, setResetStaffId] = useState("");
   const [resetPin, setResetPin] = useState("");
 
+  const [editingStaffId, setEditingStaffId] = useState<string | null>(null);
+  const [editStaffFullName, setEditStaffFullName] = useState("");
+  const [editStaffPhone, setEditStaffPhone] = useState("");
+  const [editProfileBusy, setEditProfileBusy] = useState(false);
+
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
   const [enrollingStaffId, setEnrollingStaffId] =
@@ -590,6 +597,30 @@ function App() {
     const number = digits.startsWith("91") ? digits : digits.startsWith("0") ? `91${digits.slice(1)}` : `91${digits}`;
     const msg = `Hello ${name},\n\nOur CampusPass attendance records show that you have been absent for ${days} consecutive working days. If you have approved leave or authorised campus duty, or believe your attendance record is incorrect, please contact the college administration.\n\nRegards,\nCampusPass Administration`;
     return `https://wa.me/${number}?text=${encodeURIComponent(msg)}`;
+  }
+
+  async function downloadCsv(endpoint: string, defaultFilename: string) {
+    if (!accessToken) return;
+    try {
+      const res = await fetch(`${API_URL}${endpoint}`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || "Export failed.");
+      }
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = defaultFilename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Failed to download CSV.");
+    }
   }
 
   async function loadAdminRequests(token: string) {
@@ -1324,6 +1355,41 @@ function App() {
       );
     } finally {
       setStaffBusy(false);
+    }
+  }
+
+  async function handleSaveStaffProfile(staffId: string) {
+    if (!accessToken) return;
+    setEditProfileBusy(true);
+    setStaffError("");
+    setStaffMessage("");
+    try {
+      const response = await fetch(
+        `${API_URL}/admin/staff/${encodeURIComponent(staffId)}/profile`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify({
+            full_name: editStaffFullName.trim() || null,
+            phone: editStaffPhone.trim() || null,
+          }),
+        }
+      );
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.detail || "Unable to update staff profile.");
+      }
+      setStaffMessage(`Contact updated for ${staffId}.`);
+      setEditingStaffId(null);
+      await loadStaff(accessToken);
+      await loadAbsenceAlerts(accessToken);
+    } catch (err) {
+      setStaffError(err instanceof Error ? err.message : "Failed to update profile.");
+    } finally {
+      setEditProfileBusy(false);
     }
   }
 
@@ -2255,6 +2321,19 @@ function App() {
                     <small>Staff who checked in</small>
                   </div>
 
+                  <div className="stat-card stat-amber">
+                    <div className="stat-top">
+                      <span>Half-day today</span>
+                      <span className="stat-icon">½</span>
+                    </div>
+                    <strong>
+                      {adminLoading && !adminData
+                        ? "—"
+                        : adminData?.half_day_today ?? 0}
+                    </strong>
+                    <small>Late check-in & early check-out</small>
+                  </div>
+
                   <div className="stat-card stat-orange">
                     <div className="stat-top">
                       <span>Absent today</span>
@@ -2356,14 +2435,18 @@ function App() {
                               <td>
                                 <span
                                   className={`badge ${
-                                    record.check_out
-                                      ? "verified"
-                                      : "gps-only"
+                                    record.status === "half_day"
+                                      ? "half-day"
+                                      : record.check_out
+                                        ? "verified"
+                                        : "gps-only"
                                   }`}
                                 >
-                                  {record.check_out
-                                    ? "Completed"
-                                    : "Checked in"}
+                                  {record.status === "half_day"
+                                    ? "Half Day"
+                                    : record.check_out
+                                      ? "Completed"
+                                      : "Checked in"}
                                 </span>
                               </td>
                             </tr>
@@ -2409,9 +2492,9 @@ function App() {
                   <form className="staff-form" onSubmit={handleCreateStaff}>
                     <h3>Add staff account</h3>
                     <p className="muted">
-                      Create a new staff login with a unique ID.
+                      Create a staff login and register their WhatsApp contact details.
                     </p>
-                    <label htmlFor="newStaffId">New Staff ID</label>
+                    <label htmlFor="newStaffId">Staff ID *</label>
                     <input
                       id="newStaffId"
                       value={newStaffId}
@@ -2421,7 +2504,36 @@ function App() {
                       maxLength={30}
                       required
                     />
-                    <label htmlFor="newStaffPin">Initial PIN</label>
+
+                    <label htmlFor="newStaffFullName">Full Name (optional)</label>
+                    <input
+                      id="newStaffFullName"
+                      value={newStaffFullName}
+                      onChange={(event) => setNewStaffFullName(event.target.value)}
+                      placeholder="e.g. Dr. Ramesh Sharma"
+                      maxLength={100}
+                    />
+
+                    <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 8, padding: "10px 12px", margin: "10px 0" }}>
+                      <label htmlFor="newStaffPhone" style={{ color: "#166534", fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}>
+                        💬 WhatsApp / Contact Number
+                      </label>
+                      <input
+                        id="newStaffPhone"
+                        type="tel"
+                        inputMode="tel"
+                        value={newStaffPhone}
+                        onChange={(event) => setNewStaffPhone(event.target.value)}
+                        placeholder="e.g. 9876543210 (10 digits)"
+                        maxLength={15}
+                        style={{ marginTop: 4, width: "100%", background: "white" }}
+                      />
+                      <small style={{ color: "#15803d", fontSize: 11, display: "block", marginTop: 4 }}>
+                        ✓ Absence notice messages will be sent to this WhatsApp number if absent &gt; 2 working days.
+                      </small>
+                    </div>
+
+                    <label htmlFor="newStaffPin">Initial PIN *</label>
                     <input
                       id="newStaffPin"
                       type="password"
@@ -2435,28 +2547,11 @@ function App() {
                       autoComplete="new-password"
                       required
                     />
-                    <label htmlFor="newStaffFullName">Full Name (optional)</label>
-                    <input
-                      id="newStaffFullName"
-                      value={newStaffFullName}
-                      onChange={(event) => setNewStaffFullName(event.target.value)}
-                      placeholder="e.g. Ravi Kumar"
-                      maxLength={100}
-                    />
-                    <label htmlFor="newStaffPhone">Phone Number (optional)</label>
-                    <input
-                      id="newStaffPhone"
-                      type="tel"
-                      inputMode="numeric"
-                      value={newStaffPhone}
-                      onChange={(event) => setNewStaffPhone(event.target.value)}
-                      placeholder="e.g. 9876543210"
-                      maxLength={15}
-                    />
                     <button
                       className="primary-button"
                       type="submit"
                       disabled={staffBusy}
+                      style={{ marginTop: 12 }}
                     >
                       {staffBusy ? "Please wait..." : "Create account"}
                     </button>
@@ -2523,6 +2618,8 @@ function App() {
                     <thead>
                       <tr>
                         <th>Staff ID</th>
+                        <th>Name</th>
+                        <th>WhatsApp Contact</th>
                         <th>Account status</th>
                         <th>Created</th>
                         <th>Face enrollment</th>
@@ -2532,56 +2629,123 @@ function App() {
                     <tbody>
                       {staffLoading && staffList.length === 0 ? (
                         <tr>
-                          <td colSpan={5}>Loading staff accounts...</td>
+                          <td colSpan={7}>Loading staff accounts...</td>
                         </tr>
                       ) : staffList.length === 0 ? (
                         <tr>
-                          <td colSpan={5}>No staff accounts found.</td>
+                          <td colSpan={7}>No staff accounts found.</td>
                         </tr>
                       ) : (
-                        staffList.map((staff) => (
-                          <tr key={staff.staff_id}>
-                            <td>{staff.staff_id}</td>
-                            <td>
-                              <span
-                                className={`badge ${
-                                  staff.is_active ? "verified" : "gps-only"
-                                }`}
-                              >
-                                {staff.is_active ? "Active" : "Inactive"}
-                              </span>
-                            </td>
-                            <td>
-                              {staff.created_at
-                                ? formatDateTime(staff.created_at)
-                                : "—"}
-                            </td>
-                            <td>
-                              <button
-                                className="primary-button"
-                                type="button"
-                                disabled={
-                                  staffBusy ||
-                                  !staff.is_active ||
-                                  !!enrollingStaffId
-                                }
-                                onClick={() => openFaceEnrollment(staff)}
-                              >
-                                Enroll face
-                              </button>
-                            </td>
-                            <td>
-                              <button
-                                className="outline-button"
-                                type="button"
-                                disabled={staffBusy}
-                                onClick={() => void handleToggleStaff(staff)}
-                              >
-                                {staff.is_active ? "Deactivate" : "Activate"}
-                              </button>
-                            </td>
-                          </tr>
-                        ))
+                        staffList.map((staff) => {
+                          const isEditing = editingStaffId === staff.staff_id;
+                          return (
+                            <tr key={staff.staff_id}>
+                              <td>
+                                <strong>{staff.staff_id}</strong>
+                              </td>
+                              <td>
+                                {isEditing ? (
+                                  <input
+                                    value={editStaffFullName}
+                                    onChange={(e) => setEditStaffFullName(e.target.value)}
+                                    placeholder="Full name"
+                                    style={{ fontSize: 13, padding: "4px 8px", width: 130 }}
+                                  />
+                                ) : (
+                                  staff.full_name || <span className="muted">—</span>
+                                )}
+                              </td>
+                              <td>
+                                {isEditing ? (
+                                  <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                                    <input
+                                      value={editStaffPhone}
+                                      onChange={(e) => setEditStaffPhone(e.target.value)}
+                                      placeholder="WhatsApp phone"
+                                      type="tel"
+                                      maxLength={15}
+                                      style={{ fontSize: 13, padding: "4px 8px", width: 120 }}
+                                    />
+                                    <button
+                                      type="button"
+                                      className="primary-button"
+                                      style={{ padding: "4px 10px", fontSize: 12 }}
+                                      disabled={editProfileBusy}
+                                      onClick={() => void handleSaveStaffProfile(staff.staff_id)}
+                                    >
+                                      ✓
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="outline-button"
+                                      style={{ padding: "4px 8px", fontSize: 12 }}
+                                      onClick={() => setEditingStaffId(null)}
+                                    >
+                                      ✕
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                                    {staff.phone ? (
+                                      <span style={{ fontSize: 13 }}>📱 {staff.phone}</span>
+                                    ) : (
+                                      <span className="muted" style={{ fontSize: 12 }}>Not set</span>
+                                    )}
+                                    <button
+                                      type="button"
+                                      style={{ background: "none", border: "none", cursor: "pointer", color: "var(--primary)", fontSize: 12, padding: "2px 4px", textDecoration: "underline" }}
+                                      onClick={() => {
+                                        setEditingStaffId(staff.staff_id);
+                                        setEditStaffFullName(staff.full_name || "");
+                                        setEditStaffPhone(staff.phone || "");
+                                      }}
+                                    >
+                                      {staff.phone ? "Edit" : "+ Add"}
+                                    </button>
+                                  </div>
+                                )}
+                              </td>
+                              <td>
+                                <span
+                                  className={`badge ${
+                                    staff.is_active ? "verified" : "gps-only"
+                                  }`}
+                                >
+                                  {staff.is_active ? "Active" : "Inactive"}
+                                </span>
+                              </td>
+                              <td>
+                                {staff.created_at
+                                  ? formatDateTime(staff.created_at)
+                                  : "—"}
+                              </td>
+                              <td>
+                                <button
+                                  className="primary-button"
+                                  type="button"
+                                  disabled={
+                                    staffBusy ||
+                                    !staff.is_active ||
+                                    !!enrollingStaffId
+                                  }
+                                  onClick={() => openFaceEnrollment(staff)}
+                                >
+                                  Enroll face
+                                </button>
+                              </td>
+                              <td>
+                                <button
+                                  className="outline-button"
+                                  type="button"
+                                  disabled={staffBusy}
+                                  onClick={() => void handleToggleStaff(staff)}
+                                >
+                                  {staff.is_active ? "Deactivate" : "Activate"}
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })
                       )}
                     </tbody>
                   </table>
@@ -2646,6 +2810,7 @@ function App() {
                     >
                       <option value="all">All statuses</option>
                       <option value="present">Present</option>
+                      <option value="half_day">Half-day</option>
                       <option value="absent">Absent</option>
                       <option value="checked_in">Checked in</option>
                     </select>
@@ -2714,16 +2879,20 @@ function App() {
                                 className={`badge ${
                                   record.status === "present"
                                     ? "verified"
-                                    : record.status === "checked_in"
-                                      ? "gps-only"
-                                      : ""
+                                    : record.status === "half_day"
+                                      ? "half-day"
+                                      : record.status === "checked_in"
+                                        ? "gps-only"
+                                        : ""
                                 }`}
                               >
                                 {record.status === "checked_in"
                                   ? "Checked in"
                                   : record.status === "present"
                                     ? "Present"
-                                    : "Absent"}
+                                    : record.status === "half_day"
+                                      ? "Half Day"
+                                      : "Absent"}
                               </span>
                             </td>
                           </tr>
@@ -2787,15 +2956,14 @@ function App() {
                     >
                       {adminRequestsLoading ? "Loading..." : "↻ Refresh"}
                     </button>
-                    <a
-                      href={`${API_URL}/admin/export/requests?status=${adminReqFilterStatus}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
+                    <button
+                      type="button"
                       className="outline-button"
-                      style={{ textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 4, padding: "8px 14px", borderRadius: 8 }}
+                      style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "8px 14px", borderRadius: 8, cursor: "pointer" }}
+                      onClick={() => void downloadCsv(`/admin/export/requests?status=${adminReqFilterStatus}`, `leave_duty_requests_${new Date().toISOString().slice(0, 10)}.csv`)}
                     >
                       ⬇ Export CSV
-                    </a>
+                    </button>
                   </div>
                 </div>
 
@@ -3010,15 +3178,14 @@ function App() {
                     >
                       {auditLoading ? "Loading..." : "↻ Search"}
                     </button>
-                    <a
-                      href={`${API_URL}/admin/export/audit-logs${auditFilterAction ? `?action=${encodeURIComponent(auditFilterAction)}` : ""}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
+                    <button
+                      type="button"
                       className="outline-button"
-                      style={{ textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 4, padding: "8px 14px", borderRadius: 8 }}
+                      style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "8px 14px", borderRadius: 8, cursor: "pointer" }}
+                      onClick={() => void downloadCsv(`/admin/export/audit-logs${auditFilterAction ? `?action=${encodeURIComponent(auditFilterAction)}` : ""}`, `audit_logs_${new Date().toISOString().slice(0, 10)}.csv`)}
                     >
                       ⬇ Export CSV
-                    </a>
+                    </button>
                   </div>
                 </div>
 
@@ -3065,15 +3232,14 @@ function App() {
                 {/* Export attendance CSV */}
                 <div style={{ marginTop: 24, paddingTop: 20, borderTop: "1px solid var(--border)", display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center" }}>
                   <span className="muted" style={{ fontSize: 14 }}>Export attendance records:</span>
-                  <a
-                    href={`${API_URL}/admin/export/attendance`}
-                    target="_blank"
-                    rel="noopener noreferrer"
+                  <button
+                    type="button"
                     className="outline-button"
-                    style={{ textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 4, padding: "8px 14px", borderRadius: 8, fontSize: 14 }}
+                    style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "8px 14px", borderRadius: 8, fontSize: 14, cursor: "pointer" }}
+                    onClick={() => void downloadCsv(`/admin/export/attendance`, `attendance_export_${new Date().toISOString().slice(0, 10)}.csv`)}
                   >
                     ⬇ Attendance CSV
-                  </a>
+                  </button>
                 </div>
               </div>
             )}

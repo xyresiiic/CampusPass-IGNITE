@@ -1075,7 +1075,7 @@ def check_out(
     try:
         active = (
             supabase.table("attendance")
-            .select("id")
+            .select("id, check_in")
             .eq("staff_id", staff_id)
             .is_("check_out", "null")
             .order("check_in", desc=True)
@@ -1090,23 +1090,58 @@ def check_out(
             )
 
         record_id = active.data[0]["id"]
+        check_in_str = active.data[0].get("check_in")
+        check_out_time = datetime.now(timezone.utc)
+        check_out_iso = check_out_time.isoformat()
 
-        result = (
-            supabase.table("attendance")
-            .update({
-                "check_out": datetime.now(timezone.utc).isoformat()
-            })
-            .eq("id", record_id)
-            .eq("staff_id", staff_id)
-            .is_("check_out", "null")
-            .execute()
+        # Check if staff member has an approved leave or duty today (Asia/Kolkata date)
+        now_ist = datetime.now(INDIA_TIMEZONE)
+        has_leave = services.has_approved_leave_or_duty(supabase, staff_id, now_ist.date())
+
+        # Determine attendance status under the college timings rule
+        calculated_status = services.determine_attendance_status(
+            check_in_str=check_in_str,
+            check_out_str=check_out_iso,
+            has_leave=has_leave,
         )
+
+        # Attempt to update check_out with status column in Supabase
+        try:
+            result = (
+                supabase.table("attendance")
+                .update({
+                    "check_out": check_out_iso,
+                    "status": calculated_status,
+                })
+                .eq("id", record_id)
+                .eq("staff_id", staff_id)
+                .is_("check_out", "null")
+                .execute()
+            )
+        except Exception:
+            # Fall back without status column if migration has not been applied to Supabase
+            result = (
+                supabase.table("attendance")
+                .update({
+                    "check_out": check_out_iso,
+                })
+                .eq("id", record_id)
+                .eq("staff_id", staff_id)
+                .is_("check_out", "null")
+                .execute()
+            )
 
         if not result.data:
             raise HTTPException(
                 status_code=409,
                 detail="This attendance record is already closed.",
             )
+
+        # Persist status in local DB and Supabase safely
+        services.save_attendance_status(supabase, record_id, calculated_status)
+
+        record_data = dict(result.data[0])
+        record_data["status"] = calculated_status
 
         services.log_audit_event(
             supabase,
@@ -1115,12 +1150,22 @@ def check_out(
             action="CHECK_OUT",
             target_type="attendance",
             target_id=str(record_id),
-            details={"distance_m": gps_result["distance_m"], "accuracy_m": gps_result["accuracy_m"]},
+            details={
+                "distance_m": gps_result["distance_m"],
+                "accuracy_m": gps_result["accuracy_m"],
+                "status": calculated_status,
+            },
+        )
+
+        msg = (
+            "Check-out successful. Marked as half-day (late arrival after 11:00 AM & early departure before 02:00 PM)."
+            if calculated_status == "half_day"
+            else "Check-out successful. Campus location accepted."
         )
 
         return {
-            "message": "Check-out successful. Campus location accepted.",
-            "attendance": result.data[0],
+            "message": msg,
+            "attendance": record_data,
             "location": gps_result,
             "face_verified": True,
         }
@@ -1151,9 +1196,15 @@ def my_attendance(user: dict = Depends(get_current_user)):
             .execute()
         )
 
+        enriched_records = []
+        for r in (result.data or []):
+            item = dict(r)
+            item["status"] = services.determine_attendance_status(item.get("check_in"), item.get("check_out"), item.get("status"))
+            enriched_records.append(item)
+
         return {
             "staff_id": user["staff_id"],
-            "records": result.data or [],
+            "records": enriched_records,
         }
 
     except Exception as error:
@@ -1243,6 +1294,22 @@ def admin_dashboard(user: dict = Depends(require_admin)):
             if record["staff_id"] in active_staff_ids
         }
 
+        # Enrich today records with status and count half_day
+        half_day_today = 0
+        enriched_today_records = []
+        for r in today_records:
+            item = dict(r)
+            stat = services.determine_attendance_status(
+                item.get("check_in"),
+                item.get("check_out"),
+                item.get("status"),
+                has_leave=services.has_approved_leave_or_duty(supabase, item.get("staff_id"), now_ist.date()),
+            )
+            item["status"] = stat
+            if stat == "half_day" and item.get("staff_id") in active_staff_ids:
+                half_day_today += 1
+            enriched_today_records.append(item)
+
         return {
             "date": now_ist.date().isoformat(),
             "total_staff": total_staff,
@@ -1250,8 +1317,9 @@ def admin_dashboard(user: dict = Depends(require_admin)):
             "inactive_staff": inactive_staff,
             "present_today": present_today,
             "absent_today": absent_today,
+            "half_day_today": half_day_today,
             "currently_checked_in": len(checked_in_ids),
-            "recent_attendance": today_records[:10],
+            "recent_attendance": enriched_today_records[:10],
         }
 
     except HTTPException:
@@ -1530,10 +1598,10 @@ def get_attendance_history(
     require_admin(current_user)
     assert supabase is not None
 
-    if status not in {"all", "present", "absent", "checked_in"}:
+    if status not in {"all", "present", "absent", "checked_in", "half_day"}:
         raise HTTPException(
             status_code=400,
-            detail="Invalid status. Use all, present, absent, or checked_in.",
+            detail="Invalid status. Use all, present, absent, checked_in, or half_day.",
         )
 
     start_of_day = datetime(
@@ -1590,10 +1658,12 @@ def get_attendance_history(
         record = attendance_by_staff.get(staff["staff_id"])
 
         if record:
-            record_status = (
-                "checked_in"
-                if record.get("check_out") is None
-                else "present"
+            has_leave = services.has_approved_leave_or_duty(supabase, staff["staff_id"], selected_date)
+            record_status = services.determine_attendance_status(
+                record.get("check_in"),
+                record.get("check_out"),
+                record.get("status"),
+                has_leave=has_leave,
             )
         else:
             record_status = "absent"
@@ -1628,23 +1698,60 @@ def get_audit_logs(
     return {"total": len(logs), "logs": logs}
 
 
+def require_admin_or_token(
+    token: str | None = Query(default=None),
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+) -> dict:
+    raw_token = credentials.credentials if credentials else token
+    if not raw_token:
+        raise HTTPException(
+            status_code=401,
+            detail="Admin login token required to export CSV.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    try:
+        payload = jwt.decode(
+            raw_token,
+            JWT_SECRET_KEY,
+            algorithms=[JWT_ALGORITHM],
+        )
+        staff_id = payload.get("sub")
+        role = payload.get("role")
+        if not staff_id or role != "admin":
+            raise HTTPException(
+                status_code=403,
+                detail="Admin access required.",
+            )
+        return {"staff_id": staff_id, "role": role}
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Session expired. Please log in again.")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Invalid login token.")
+
+
 @app.get("/admin/export/attendance")
 def export_attendance_csv(
     start_date: Date | None = Query(default=None),
     end_date: Date | None = Query(default=None),
-    user: dict = Depends(require_admin),
+    user: dict = Depends(require_admin_or_token),
 ):
     assert supabase is not None
-    query = supabase.table("attendance").select("id, staff_id, check_in, check_out, created_at").order("check_in", desc=True)
-    if start_date:
-        start_dt = datetime(start_date.year, start_date.month, start_date.day, tzinfo=INDIA_TIMEZONE)
-        query = query.gte("check_in", start_dt.astimezone(timezone.utc).isoformat())
-    if end_date:
-        end_dt = datetime(end_date.year, end_date.month, end_date.day, tzinfo=INDIA_TIMEZONE) + timedelta(days=1)
-        query = query.lt("check_in", end_dt.astimezone(timezone.utc).isoformat())
+    records = []
+    try:
+        query = supabase.table("attendance").select("id, staff_id, check_in, check_out, created_at").order("check_in", desc=True)
+        if start_date:
+            start_dt = datetime(start_date.year, start_date.month, start_date.day, tzinfo=INDIA_TIMEZONE)
+            query = query.gte("check_in", start_dt.astimezone(timezone.utc).isoformat())
+        if end_date:
+            end_dt = datetime(end_date.year, end_date.month, end_date.day, tzinfo=INDIA_TIMEZONE) + timedelta(days=1)
+            query = query.lt("check_in", end_dt.astimezone(timezone.utc).isoformat())
 
-    res = query.limit(1000).execute()
-    csv_data = services.export_attendance_csv(res.data or [])
+        res = query.limit(1000).execute()
+        records = res.data or []
+    except Exception as e:
+        print(f"Export attendance Supabase query error: {e}")
+
+    csv_data = services.export_attendance_csv(records)
     filename = f"attendance_export_{Date.today().isoformat()}.csv"
     return Response(
         content=csv_data,
@@ -1657,7 +1764,7 @@ def export_attendance_csv(
 def export_audit_logs_csv(
     action: str | None = Query(default=None),
     actor_id: str | None = Query(default=None),
-    user: dict = Depends(require_admin),
+    user: dict = Depends(require_admin_or_token),
 ):
     logs = services.get_audit_logs(supabase, action=action, actor_id=actor_id, limit=1000)
     csv_data = services.export_audit_logs_csv(logs)
@@ -1672,7 +1779,7 @@ def export_audit_logs_csv(
 @app.get("/admin/export/requests")
 def export_requests_csv(
     status: str = Query(default="all"),
-    user: dict = Depends(require_admin),
+    user: dict = Depends(require_admin_or_token),
 ):
     requests_list = services.get_all_requests(supabase, status=status)
     csv_data = services.export_leave_requests_csv(requests_list)
