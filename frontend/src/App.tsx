@@ -2,8 +2,46 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import "./App.css";
 
 type Screen = "login" | "verify" | "admin";
-type AdminSection = "overview" | "staff" | "history";
+type AdminSection = "overview" | "staff" | "history" | "requests" | "audit" | "notifications";
 type AttendanceAction = "check-in" | "check-out";
+
+type LeaveRequest = {
+  id: string;
+  staff_id: string;
+  request_type: "leave" | "duty";
+  start_date: string;
+  end_date: string;
+  reason: string;
+  status: "pending" | "approved" | "rejected";
+  reviewer_id?: string | null;
+  review_comment?: string | null;
+  escalated: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+type Notification = {
+  id: string;
+  recipient_id: string;
+  recipient_role: string;
+  title: string;
+  message: string;
+  type: string;
+  is_read: boolean;
+  reference_id?: string | null;
+  created_at: string;
+};
+
+type AuditLog = {
+  id?: number | string;
+  actor_id: string;
+  actor_role: string;
+  action: string;
+  target_type?: string | null;
+  target_id?: string | null;
+  details?: Record<string, unknown> | null;
+  created_at: string;
+};
 
 type AttendanceRecord = {
   id: number;
@@ -309,6 +347,41 @@ function App() {
   const [enrollMessage, setEnrollMessage] = useState("");
   const enrollVideoRef = useRef<HTMLVideoElement | null>(null);
 
+  // Phase 2 — Leave / Off-campus duty requests (staff view)
+  const [myRequests, setMyRequests] = useState<LeaveRequest[]>([]);
+  const [myRequestsLoading, setMyRequestsLoading] = useState(false);
+  const [reqType, setReqType] = useState<"leave" | "duty">("leave");
+  const [reqStartDate, setReqStartDate] = useState("");
+  const [reqEndDate, setReqEndDate] = useState("");
+  const [reqReason, setReqReason] = useState("");
+  const [reqBusy, setReqBusy] = useState(false);
+  const [reqMessage, setReqMessage] = useState("");
+  const [reqError, setReqError] = useState("");
+
+  // Phase 2 — Admin approval panel
+  const [adminRequests, setAdminRequests] = useState<LeaveRequest[]>([]);
+  const [adminRequestsLoading, setAdminRequestsLoading] = useState(false);
+  const [adminRequestsError, setAdminRequestsError] = useState("");
+  const [adminReqFilterStatus, setAdminReqFilterStatus] = useState("all");
+  const [adminReqFilterType, setAdminReqFilterType] = useState("all");
+  const [reviewingId, setReviewingId] = useState<string | null>(null);
+  const [reviewComment, setReviewComment] = useState("");
+  const [reviewBusy, setReviewBusy] = useState(false);
+  const [reviewMessage, setReviewMessage] = useState("");
+
+  // Phase 3 — Notifications
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [notifUnread, setNotifUnread] = useState(0);
+  const [notifLoading, setNotifLoading] = useState(false);
+  const [markingRead, setMarkingRead] = useState(false);
+
+  // Phase 1 — Audit logs
+  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
+  const [auditLoading, setAuditLoading] = useState(false);
+  const [auditError, setAuditError] = useState("");
+  const [auditFilterAction, setAuditFilterAction] = useState("");
+  const [auditFilterActor, setAuditFilterActor] = useState("");
+
   async function checkBackend() {
     try {
       const response = await fetch(`${API_URL}/health`);
@@ -327,6 +400,197 @@ function App() {
   useEffect(() => {
     void checkBackend();
   }, []);
+
+  // Phase 3 — poll notifications every 60 s when logged in
+  useEffect(() => {
+    if (!accessToken) return;
+    void loadNotifications(accessToken);
+    const interval = window.setInterval(() => {
+      void loadNotifications(accessToken);
+    }, 60_000);
+    return () => window.clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accessToken]);
+
+  async function loadNotifications(token: string) {
+    if (!token) return;
+    setNotifLoading(true);
+    try {
+      const res = await fetch(`${API_URL}/notifications?limit=50`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      setNotifications(Array.isArray(data.notifications) ? data.notifications : []);
+      setNotifUnread(typeof data.unread_count === "number" ? data.unread_count : 0);
+    } catch {
+      // silent
+    } finally {
+      setNotifLoading(false);
+    }
+  }
+
+  async function handleMarkAllRead() {
+    if (!accessToken || markingRead) return;
+    setMarkingRead(true);
+    try {
+      await fetch(`${API_URL}/notifications/read-all`, {
+        method: "PATCH",
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      await loadNotifications(accessToken);
+    } catch {
+      // silent
+    } finally {
+      setMarkingRead(false);
+    }
+  }
+
+  async function handleMarkOneRead(id: string) {
+    if (!accessToken) return;
+    try {
+      await fetch(`${API_URL}/notifications/${encodeURIComponent(id)}/read`, {
+        method: "PATCH",
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      setNotifications((prev) =>
+        prev.map((n) => (n.id === id ? { ...n, is_read: true } : n))
+      );
+      setNotifUnread((c) => Math.max(0, c - 1));
+    } catch {
+      // silent
+    }
+  }
+
+  async function loadAuditLogs(token: string) {
+    setAuditLoading(true);
+    setAuditError("");
+    try {
+      const params = new URLSearchParams({ limit: "200" });
+      if (auditFilterAction.trim()) params.set("action", auditFilterAction.trim());
+      if (auditFilterActor.trim()) params.set("actor_id", auditFilterActor.trim().toUpperCase());
+      const res = await fetch(`${API_URL}/admin/audit-logs?${params.toString()}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Failed to load audit logs.");
+      setAuditLogs(Array.isArray(data.logs) ? data.logs : []);
+    } catch (e) {
+      setAuditError(e instanceof Error ? e.message : "Failed to load audit logs.");
+    } finally {
+      setAuditLoading(false);
+    }
+  }
+
+  async function loadAdminRequests(token: string) {
+    setAdminRequestsLoading(true);
+    setAdminRequestsError("");
+    try {
+      const params = new URLSearchParams();
+      if (adminReqFilterStatus !== "all") params.set("status", adminReqFilterStatus);
+      if (adminReqFilterType !== "all") params.set("request_type", adminReqFilterType);
+      const res = await fetch(`${API_URL}/admin/requests?${params.toString()}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Failed to load requests.");
+      setAdminRequests(Array.isArray(data.requests) ? data.requests : []);
+    } catch (e) {
+      setAdminRequestsError(e instanceof Error ? e.message : "Failed to load requests.");
+    } finally {
+      setAdminRequestsLoading(false);
+    }
+  }
+
+  async function handleReviewRequest(id: string, status: "approved" | "rejected") {
+    if (!accessToken || reviewBusy) return;
+    setReviewBusy(true);
+    setReviewMessage("");
+    try {
+      const res = await fetch(`${API_URL}/admin/requests/${encodeURIComponent(id)}/review`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({ status, review_comment: reviewComment || null }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Review failed.");
+      setReviewMessage(`Request ${status} successfully.`);
+      setReviewingId(null);
+      setReviewComment("");
+      await loadAdminRequests(accessToken);
+      await loadNotifications(accessToken);
+    } catch (e) {
+      setReviewMessage(e instanceof Error ? e.message : "Review failed.");
+    } finally {
+      setReviewBusy(false);
+    }
+  }
+
+  async function loadMyRequests(token: string) {
+    setMyRequestsLoading(true);
+    try {
+      const res = await fetch(`${API_URL}/requests/me`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setMyRequests(Array.isArray(data.requests) ? data.requests : []);
+      }
+    } catch {
+      // silent
+    } finally {
+      setMyRequestsLoading(false);
+    }
+  }
+
+  async function handleSubmitRequest(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!accessToken || reqBusy) return;
+    setReqError("");
+    setReqMessage("");
+    if (!reqStartDate || !reqEndDate) {
+      setReqError("Please select both start and end dates.");
+      return;
+    }
+    if (reqStartDate > reqEndDate) {
+      setReqError("Start date cannot be after end date.");
+      return;
+    }
+    if (reqReason.trim().length < 3) {
+      setReqError("Please provide a reason (minimum 3 characters).");
+      return;
+    }
+    setReqBusy(true);
+    try {
+      const res = await fetch(`${API_URL}/requests`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({
+          request_type: reqType,
+          start_date: reqStartDate,
+          end_date: reqEndDate,
+          reason: reqReason.trim(),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Could not submit request.");
+      setReqMessage(`Request submitted successfully (ID: ${data.request?.id ?? ""}).`);
+      setReqReason("");
+      setReqStartDate("");
+      setReqEndDate("");
+      await loadMyRequests(accessToken);
+    } catch (e) {
+      setReqError(e instanceof Error ? e.message : "Could not submit request.");
+    } finally {
+      setReqBusy(false);
+    }
+  }
 
   useEffect(() => {
     if (screen !== "verify") return;
@@ -573,6 +837,10 @@ function App() {
       void loadAdminDashboard(accessToken);
       void loadStaff(accessToken);
       void loadAttendanceHistory(accessToken);
+      void loadAdminRequests(accessToken);
+    }
+    if (screen === "verify" && accessToken) {
+      void loadMyRequests(accessToken);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [screen, accessToken]);
@@ -591,6 +859,11 @@ function App() {
     setHistoryError("");
     setFaceProof("");
     setFaceProofAction(null);
+    setMyRequests([]);
+    setAdminRequests([]);
+    setNotifications([]);
+    setNotifUnread(0);
+    setAuditLogs([]);
 
     if (!staffId.trim() || !pin.trim()) {
       setMessage("Please enter your Staff ID and PIN.");
@@ -1175,6 +1448,21 @@ function App() {
     setPin("");
     setAdminSection("overview");
     setSidebarOpen(false);
+    // Phase 2/3 reset
+    setMyRequests([]);
+    setAdminRequests([]);
+    setAdminRequestsError("");
+    setReviewingId(null);
+    setReviewComment("");
+    setReviewMessage("");
+    setReqMessage("");
+    setReqError("");
+    setNotifications([]);
+    setNotifUnread(0);
+    setAuditLogs([]);
+    setAuditError("");
+    setAuditFilterAction("");
+    setAuditFilterActor("");
     setScreen("login");
   }
 
@@ -1194,6 +1482,9 @@ function App() {
     overview: "Dashboard overview",
     staff: "Staff management",
     history: "Attendance history",
+    requests: "Leave & duty requests",
+    audit: "Audit trail",
+    notifications: "Notifications",
   };
 
   return (
@@ -1482,6 +1773,106 @@ function App() {
               </div>
             </div>
           </section>
+
+          {/* Phase 2: Staff — Leave / Duty Request Form */}
+          <section className="workflow-card" style={{ marginTop: 24 }}>
+            <span className="eyebrow">LEAVE &amp; OFF-CAMPUS DUTY</span>
+            <h2>Submit a request</h2>
+            <p className="muted">Submit a leave or off-campus duty request for admin approval.</p>
+
+            <form onSubmit={handleSubmitRequest} style={{ display: "flex", flexDirection: "column", gap: 14, maxWidth: 480 }}>
+              <div>
+                <label htmlFor="reqType" style={{ display: "block", marginBottom: 4, fontSize: 14, fontWeight: 600 }}>Request type</label>
+                <select
+                  id="reqType"
+                  value={reqType}
+                  onChange={(e) => setReqType(e.target.value as "leave" | "duty")}
+                  required
+                  style={{ width: "100%", padding: "10px 12px", borderRadius: 10, border: "1px solid var(--border)", fontSize: 14 }}
+                >
+                  <option value="leave">Leave</option>
+                  <option value="duty">Off-campus duty</option>
+                </select>
+              </div>
+              <div style={{ display: "flex", gap: 12 }}>
+                <div style={{ flex: 1 }}>
+                  <label htmlFor="reqStart" style={{ display: "block", marginBottom: 4, fontSize: 14, fontWeight: 600 }}>Start date</label>
+                  <input id="reqStart" type="date" value={reqStartDate} onChange={(e) => setReqStartDate(e.target.value)} required style={{ width: "100%", padding: "10px 12px", borderRadius: 10, border: "1px solid var(--border)", fontSize: 14 }} />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <label htmlFor="reqEnd" style={{ display: "block", marginBottom: 4, fontSize: 14, fontWeight: 600 }}>End date</label>
+                  <input id="reqEnd" type="date" value={reqEndDate} onChange={(e) => setReqEndDate(e.target.value)} required style={{ width: "100%", padding: "10px 12px", borderRadius: 10, border: "1px solid var(--border)", fontSize: 14 }} />
+                </div>
+              </div>
+              <div>
+                <label htmlFor="reqReason" style={{ display: "block", marginBottom: 4, fontSize: 14, fontWeight: 600 }}>Reason</label>
+                <textarea
+                  id="reqReason"
+                  value={reqReason}
+                  onChange={(e) => setReqReason(e.target.value)}
+                  placeholder="Brief reason for your request..."
+                  minLength={3}
+                  maxLength={500}
+                  required
+                  rows={3}
+                  style={{ width: "100%", padding: "10px 12px", borderRadius: 10, border: "1px solid var(--border)", fontSize: 14, fontFamily: "inherit", resize: "vertical" }}
+                />
+              </div>
+              {reqError && <p className="error-message" role="alert">{reqError}</p>}
+              {reqMessage && <p className="success-message" role="status">{reqMessage}</p>}
+              <button className="primary-button" type="submit" disabled={reqBusy}>
+                {reqBusy ? "Submitting..." : "Submit request"}
+              </button>
+            </form>
+
+            {/* My requests list */}
+            <div style={{ marginTop: 28 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+                <h3 style={{ margin: 0 }}>My requests</h3>
+                <button className="outline-button" type="button" disabled={myRequestsLoading} onClick={() => void loadMyRequests(accessToken)} style={{ fontSize: 13 }}>
+                  {myRequestsLoading ? "Loading..." : "↻ Refresh"}
+                </button>
+              </div>
+              <div className="table-scroll">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>ID</th>
+                      <th>Type</th>
+                      <th>Dates</th>
+                      <th>Status</th>
+                      <th>Note</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {myRequestsLoading && myRequests.length === 0 ? (
+                      <tr><td colSpan={5}>Loading...</td></tr>
+                    ) : myRequests.length === 0 ? (
+                      <tr><td colSpan={5}>No requests submitted yet.</td></tr>
+                    ) : (
+                      myRequests.map((req) => (
+                        <tr key={req.id}>
+                          <td style={{ fontSize: 12, fontFamily: "monospace" }}>{req.id}</td>
+                          <td><span className={`badge ${req.request_type === "leave" ? "gps-only" : "verified"}`}>{req.request_type === "duty" ? "Off-campus" : "Leave"}</span></td>
+                          <td style={{ whiteSpace: "nowrap", fontSize: 13 }}>{req.start_date} → {req.end_date}</td>
+                          <td>
+                            <span className={`badge ${
+                              req.status === "approved" ? "verified" :
+                              req.status === "rejected" ? "badge-red" : "gps-only"
+                            }`}>
+                              {req.status.charAt(0).toUpperCase() + req.status.slice(1)}
+                              {req.escalated ? " ⚠" : ""}
+                            </span>
+                          </td>
+                          <td style={{ fontSize: 12, color: "var(--muted)" }}>{req.review_comment || "—"}</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </section>
         </main>
       )}
 
@@ -1543,6 +1934,56 @@ function App() {
                 <span className="nav-icon">▤</span>
                 <span>Attendance history</span>
               </button>
+
+              <button
+                type="button"
+                className={`nav-item ${
+                  adminSection === "requests" ? "active" : ""
+                }`}
+                onClick={() => {
+                  setAdminSection("requests");
+                  setSidebarOpen(false);
+                  void loadAdminRequests(accessToken);
+                }}
+              >
+                <span className="nav-icon">📋</span>
+                <span>Leave &amp; duty</span>
+              </button>
+
+              <button
+                type="button"
+                className={`nav-item ${
+                  adminSection === "notifications" ? "active" : ""
+                }`}
+                onClick={() => {
+                  setAdminSection("notifications");
+                  setSidebarOpen(false);
+                  void loadNotifications(accessToken);
+                }}
+              >
+                <span className="nav-icon">🔔</span>
+                <span>
+                  Notifications
+                  {notifUnread > 0 && (
+                    <span className="notif-badge">{notifUnread}</span>
+                  )}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                className={`nav-item ${
+                  adminSection === "audit" ? "active" : ""
+                }`}
+                onClick={() => {
+                  setAdminSection("audit");
+                  setSidebarOpen(false);
+                  void loadAuditLogs(accessToken);
+                }}
+              >
+                <span className="nav-icon">🗂</span>
+                <span>Audit trail</span>
+              </button>
             </nav>
 
             <div className="sidebar-bottom">
@@ -1581,6 +2022,19 @@ function App() {
                   <span className="status-dot" />
                   {apiStatus}
                 </span>
+                {notifUnread > 0 && (
+                  <button
+                    className="notif-bell-button"
+                    type="button"
+                    title={`${notifUnread} unread notification${notifUnread > 1 ? "s" : ""}`}
+                    onClick={() => {
+                      setAdminSection("notifications");
+                      void loadNotifications(accessToken);
+                    }}
+                  >
+                    🔔 <span className="notif-badge">{notifUnread}</span>
+                  </button>
+                )}
                 <button
                   className="outline-button"
                   type="button"
@@ -1589,6 +2043,7 @@ function App() {
                     void loadAdminDashboard(accessToken);
                     void loadStaff(accessToken);
                     void loadAttendanceHistory(accessToken);
+                    void loadNotifications(accessToken);
                   }}
                 >
                   {adminLoading || staffLoading
@@ -2128,6 +2583,336 @@ function App() {
                   >
                     ↻ Refresh results
                   </button>
+                </div>
+              </div>
+            )}
+
+            {/* Phase 2: Admin — Requests Panel */}
+            {adminSection === "requests" && (
+              <div className="table-card">
+                <div className="admin-heading">
+                  <div>
+                    <span className="eyebrow">APPROVALS</span>
+                    <h2>Leave &amp; off-campus duty requests</h2>
+                    <p className="muted">
+                      Review, approve, or reject pending staff requests.
+                    </p>
+                  </div>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                    <select
+                      value={adminReqFilterStatus}
+                      onChange={(e) => setAdminReqFilterStatus(e.target.value)}
+                      style={{ fontSize: 14, padding: "6px 10px", borderRadius: 8, border: "1px solid var(--border)" }}
+                    >
+                      <option value="all">All statuses</option>
+                      <option value="pending">Pending</option>
+                      <option value="approved">Approved</option>
+                      <option value="rejected">Rejected</option>
+                    </select>
+                    <select
+                      value={adminReqFilterType}
+                      onChange={(e) => setAdminReqFilterType(e.target.value)}
+                      style={{ fontSize: 14, padding: "6px 10px", borderRadius: 8, border: "1px solid var(--border)" }}
+                    >
+                      <option value="all">All types</option>
+                      <option value="leave">Leave</option>
+                      <option value="duty">Off-campus duty</option>
+                    </select>
+                    <button
+                      className="outline-button"
+                      type="button"
+                      disabled={adminRequestsLoading}
+                      onClick={() => void loadAdminRequests(accessToken)}
+                    >
+                      {adminRequestsLoading ? "Loading..." : "↻ Refresh"}
+                    </button>
+                    <a
+                      href={`${API_URL}/admin/export/requests?status=${adminReqFilterStatus}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="outline-button"
+                      style={{ textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 4, padding: "8px 14px", borderRadius: 8 }}
+                    >
+                      ⬇ Export CSV
+                    </a>
+                  </div>
+                </div>
+
+                {adminRequestsError && (
+                  <p className="error-message" role="alert">{adminRequestsError}</p>
+                )}
+                {reviewMessage && (
+                  <p className="success-message" role="status">{reviewMessage}</p>
+                )}
+
+                <div className="table-scroll">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>ID</th>
+                        <th>Staff ID</th>
+                        <th>Type</th>
+                        <th>Dates</th>
+                        <th>Reason</th>
+                        <th>Status</th>
+                        <th>Escalated</th>
+                        <th>Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {adminRequestsLoading && adminRequests.length === 0 ? (
+                        <tr><td colSpan={8}>Loading requests...</td></tr>
+                      ) : adminRequests.length === 0 ? (
+                        <tr><td colSpan={8}>No requests found.</td></tr>
+                      ) : (
+                        adminRequests.map((req) => (
+                          <tr key={req.id}>
+                            <td style={{ fontFamily: "monospace", fontSize: 12 }}>{req.id}</td>
+                            <td>{req.staff_id}</td>
+                            <td>
+                              <span className={`badge ${req.request_type === "leave" ? "gps-only" : "verified"}`}>
+                                {req.request_type === "duty" ? "Off-campus duty" : "Leave"}
+                              </span>
+                            </td>
+                            <td style={{ whiteSpace: "nowrap" }}>{req.start_date} → {req.end_date}</td>
+                            <td style={{ maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={req.reason}>{req.reason}</td>
+                            <td>
+                              <span className={`badge ${
+                                req.status === "approved" ? "verified" :
+                                req.status === "rejected" ? "badge-red" : "gps-only"
+                              }`}>
+                                {req.status.charAt(0).toUpperCase() + req.status.slice(1)}
+                              </span>
+                            </td>
+                            <td>{req.escalated ? <span className="badge badge-red">⚠ Yes</span> : "No"}</td>
+                            <td>
+                              {req.status === "pending" ? (
+                                reviewingId === req.id ? (
+                                  <div style={{ display: "flex", flexDirection: "column", gap: 6, minWidth: 200 }}>
+                                    <input
+                                      type="text"
+                                      placeholder="Comment (optional)"
+                                      value={reviewComment}
+                                      onChange={(e) => setReviewComment(e.target.value)}
+                                      style={{ fontSize: 13, padding: "4px 8px", borderRadius: 6, border: "1px solid var(--border)" }}
+                                    />
+                                    <div style={{ display: "flex", gap: 6 }}>
+                                      <button
+                                        className="primary-button"
+                                        type="button"
+                                        disabled={reviewBusy}
+                                        style={{ fontSize: 13, padding: "5px 12px" }}
+                                        onClick={() => void handleReviewRequest(req.id, "approved")}
+                                      >
+                                        ✓ Approve
+                                      </button>
+                                      <button
+                                        className="outline-button"
+                                        type="button"
+                                        disabled={reviewBusy}
+                                        style={{ fontSize: 13, padding: "5px 12px", color: "var(--red)" }}
+                                        onClick={() => void handleReviewRequest(req.id, "rejected")}
+                                      >
+                                        ✗ Reject
+                                      </button>
+                                      <button
+                                        className="outline-button"
+                                        type="button"
+                                        style={{ fontSize: 13, padding: "5px 10px" }}
+                                        onClick={() => { setReviewingId(null); setReviewComment(""); }}
+                                      >
+                                        Cancel
+                                      </button>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <button
+                                    className="outline-button"
+                                    type="button"
+                                    style={{ fontSize: 13 }}
+                                    onClick={() => { setReviewingId(req.id); setReviewComment(""); setReviewMessage(""); }}
+                                  >
+                                    Review
+                                  </button>
+                                )
+                              ) : (
+                                <span className="muted" style={{ fontSize: 13 }}>
+                                  {req.reviewer_id ? `By ${req.reviewer_id}` : "—"}
+                                  {req.review_comment ? ` · "${req.review_comment}"` : ""}
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* Phase 3: Admin — Notifications Panel */}
+            {adminSection === "notifications" && (
+              <div className="table-card">
+                <div className="admin-heading">
+                  <div>
+                    <span className="eyebrow">INBOX</span>
+                    <h2>Notifications</h2>
+                    <p className="muted">System alerts, approvals, and escalation notices.</p>
+                  </div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button
+                      className="outline-button"
+                      type="button"
+                      disabled={notifLoading}
+                      onClick={() => void loadNotifications(accessToken)}
+                    >
+                      {notifLoading ? "Loading..." : "↻ Refresh"}
+                    </button>
+                    <button
+                      className="outline-button"
+                      type="button"
+                      disabled={markingRead || notifUnread === 0}
+                      onClick={() => void handleMarkAllRead()}
+                    >
+                      Mark all read
+                    </button>
+                  </div>
+                </div>
+
+                {notifications.length === 0 ? (
+                  <div style={{ padding: "32px", textAlign: "center", color: "var(--muted)" }}>
+                    {notifLoading ? "Loading notifications..." : "No notifications yet."}
+                  </div>
+                ) : (
+                  <div className="notif-list">
+                    {notifications.map((n) => (
+                      <div
+                        key={n.id}
+                        className={`notif-item ${
+                          !n.is_read ? "notif-unread" : ""
+                        } notif-type-${n.type}`}
+                      >
+                        <div className="notif-item-header">
+                          <strong>{n.title}</strong>
+                          <span className="notif-time muted">
+                            {formatDateTime(n.created_at)}
+                          </span>
+                        </div>
+                        <p className="notif-body">{n.message}</p>
+                        {!n.is_read && (
+                          <button
+                            className="text-button"
+                            type="button"
+                            style={{ fontSize: 12 }}
+                            onClick={() => void handleMarkOneRead(n.id)}
+                          >
+                            Mark as read
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Phase 1: Admin — Audit Trail */}
+            {adminSection === "audit" && (
+              <div className="table-card">
+                <div className="admin-heading">
+                  <div>
+                    <span className="eyebrow">SECURITY &amp; COMPLIANCE</span>
+                    <h2>Audit trail</h2>
+                    <p className="muted">Immutable record of all actions performed in CampusPass.</p>
+                  </div>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                    <input
+                      type="text"
+                      placeholder="Filter action (e.g. CHECK_IN)"
+                      value={auditFilterAction}
+                      onChange={(e) => setAuditFilterAction(e.target.value)}
+                      style={{ fontSize: 13, padding: "6px 10px", borderRadius: 8, border: "1px solid var(--border)", minWidth: 170 }}
+                    />
+                    <input
+                      type="text"
+                      placeholder="Filter actor ID"
+                      value={auditFilterActor}
+                      onChange={(e) => setAuditFilterActor(e.target.value)}
+                      style={{ fontSize: 13, padding: "6px 10px", borderRadius: 8, border: "1px solid var(--border)", minWidth: 130 }}
+                    />
+                    <button
+                      className="outline-button"
+                      type="button"
+                      disabled={auditLoading}
+                      onClick={() => void loadAuditLogs(accessToken)}
+                    >
+                      {auditLoading ? "Loading..." : "↻ Search"}
+                    </button>
+                    <a
+                      href={`${API_URL}/admin/export/audit-logs${auditFilterAction ? `?action=${encodeURIComponent(auditFilterAction)}` : ""}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="outline-button"
+                      style={{ textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 4, padding: "8px 14px", borderRadius: 8 }}
+                    >
+                      ⬇ Export CSV
+                    </a>
+                  </div>
+                </div>
+
+                {auditError && <p className="error-message" role="alert">{auditError}</p>}
+
+                <div className="table-scroll">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Timestamp (IST)</th>
+                        <th>Actor</th>
+                        <th>Role</th>
+                        <th>Action</th>
+                        <th>Target</th>
+                        <th>Details</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {auditLoading && auditLogs.length === 0 ? (
+                        <tr><td colSpan={6}>Loading audit logs...</td></tr>
+                      ) : auditLogs.length === 0 ? (
+                        <tr><td colSpan={6}>No audit log entries found.</td></tr>
+                      ) : (
+                        auditLogs.map((log, i) => (
+                          <tr key={log.id ?? i}>
+                            <td style={{ whiteSpace: "nowrap", fontSize: 13 }}>{formatDateTime(log.created_at)}</td>
+                            <td>{log.actor_id}</td>
+                            <td><span className="badge gps-only" style={{ fontSize: 11 }}>{log.actor_role}</span></td>
+                            <td style={{ fontFamily: "monospace", fontSize: 12 }}>{log.action}</td>
+                            <td style={{ fontSize: 12 }}>
+                              {log.target_type && <span>{log.target_type}{log.target_id ? ` · ${log.target_id}` : ""}</span>}
+                            </td>
+                            <td style={{ fontSize: 12, maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                              title={log.details ? JSON.stringify(log.details) : ""}>
+                              {log.details ? JSON.stringify(log.details) : ""}
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Export attendance CSV */}
+                <div style={{ marginTop: 24, paddingTop: 20, borderTop: "1px solid var(--border)", display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center" }}>
+                  <span className="muted" style={{ fontSize: 14 }}>Export attendance records:</span>
+                  <a
+                    href={`${API_URL}/admin/export/attendance`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="outline-button"
+                    style={{ textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 4, padding: "8px 14px", borderRadius: 8, fontSize: 14 }}
+                  >
+                    ⬇ Attendance CSV
+                  </a>
                 </div>
               </div>
             )}

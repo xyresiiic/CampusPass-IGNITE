@@ -17,11 +17,12 @@ from contextlib import asynccontextmanager
 
 import jwt
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Depends, Query
+from fastapi import FastAPI, HTTPException, Depends, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
 from supabase import create_client, Client
+import services
 
 
 load_dotenv()
@@ -52,6 +53,7 @@ ENVIRONMENT = os.getenv("ENVIRONMENT", "production").lower()
 ENABLE_DEMO_SEEDING = (
     os.getenv("ENABLE_DEMO_SEEDING", "false").lower() in ("true", "1", "yes")
 )
+ESCALATION_DEADLINE_HOURS = int(os.getenv("ESCALATION_DEADLINE_HOURS", "24"))
 
 INDIA_TIMEZONE = timezone(timedelta(hours=5, minutes=30))
 bearer_scheme = HTTPBearer(auto_error=False)
@@ -636,6 +638,13 @@ def login(data: LoginRequest):
         )
 
     if not result.data:
+        services.log_audit_event(
+            supabase,
+            actor_id=data.staff_id.strip().upper(),
+            actor_role="guest",
+            action="LOGIN_FAILED",
+            details={"reason": "User not found"},
+        )
         raise HTTPException(
             status_code=401,
             detail="Invalid Staff ID or Security PIN",
@@ -645,12 +654,26 @@ def login(data: LoginRequest):
     submitted_hash = hash_pin(data.pin, user["pin_salt"])
 
     if not hmac.compare_digest(submitted_hash, user["pin_hash"]):
+        services.log_audit_event(
+            supabase,
+            actor_id=data.staff_id.strip().upper(),
+            actor_role="guest",
+            action="LOGIN_FAILED",
+            details={"reason": "Invalid PIN"},
+        )
         raise HTTPException(
             status_code=401,
             detail="Invalid Staff ID or Security PIN",
         )
 
     if not user.get("is_active", True):
+        services.log_audit_event(
+            supabase,
+            actor_id=data.staff_id.strip().upper(),
+            actor_role=user.get("role", "staff"),
+            action="LOGIN_FAILED",
+            details={"reason": "Account deactivated"},
+        )
         raise HTTPException(
             status_code=403,
             detail=(
@@ -670,6 +693,13 @@ def login(data: LoginRequest):
         },
         JWT_SECRET_KEY,
         algorithm=JWT_ALGORITHM,
+    )
+
+    services.log_audit_event(
+        supabase,
+        actor_id=user["staff_id"],
+        actor_role=user["role"],
+        action="LOGIN_SUCCESS",
     )
 
     return {
@@ -763,6 +793,15 @@ def enroll_staff_face(
             supabase.table("staff_face_profiles").insert(
                 profile
             ).execute()
+
+        services.log_audit_event(
+            supabase,
+            actor_id=admin["staff_id"],
+            actor_role="admin",
+            action="ENROLL_FACE",
+            target_type="face_profile",
+            target_id=normalized_id,
+        )
 
         return {
             "message": "Staff face enrolled successfully.",
@@ -976,6 +1015,16 @@ def check_in(
                 detail="The attendance record could not be saved.",
             )
 
+        services.log_audit_event(
+            supabase,
+            actor_id=staff_id,
+            actor_role="staff",
+            action="CHECK_IN",
+            target_type="attendance",
+            target_id=str(result.data[0]["id"]),
+            details={"distance_m": gps_result["distance_m"], "accuracy_m": gps_result["accuracy_m"]},
+        )
+
         return {
             "message": "Check-in successful. Campus location accepted.",
             "attendance": result.data[0],
@@ -1058,6 +1107,16 @@ def check_out(
                 status_code=409,
                 detail="This attendance record is already closed.",
             )
+
+        services.log_audit_event(
+            supabase,
+            actor_id=staff_id,
+            actor_role="staff",
+            action="CHECK_OUT",
+            target_type="attendance",
+            target_id=str(record_id),
+            details={"distance_m": gps_result["distance_m"], "accuracy_m": gps_result["accuracy_m"]},
+        )
 
         return {
             "message": "Check-out successful. Campus location accepted.",
@@ -1300,6 +1359,15 @@ def create_staff(
             "is_active": True,
         }).execute()
 
+        services.log_audit_event(
+            supabase,
+            actor_id=user["staff_id"],
+            actor_role="admin",
+            action="CREATE_STAFF",
+            target_type="staff",
+            target_id=staff_id,
+        )
+
         return {
             "message": "Staff account created successfully.",
             "staff_id": staff_id,
@@ -1350,6 +1418,15 @@ def reset_staff_pin(
             "pin_hash": hash_pin(pin, salt),
         }).eq("staff_id", normalized_id).execute()
 
+        services.log_audit_event(
+            supabase,
+            actor_id=user["staff_id"],
+            actor_role="admin",
+            action="RESET_PIN",
+            target_type="staff",
+            target_id=normalized_id,
+        )
+
         return {
             "message": "Staff PIN reset successfully.",
             "staff_id": normalized_id,
@@ -1393,6 +1470,15 @@ def update_staff_status(
         supabase.table("staff_users").update({
             "is_active": data.is_active,
         }).eq("staff_id", normalized_id).execute()
+
+        services.log_audit_event(
+            supabase,
+            actor_id=user["staff_id"],
+            actor_role="admin",
+            action="ACTIVATE_STAFF" if data.is_active else "DEACTIVATE_STAFF",
+            target_type="staff",
+            target_id=normalized_id,
+        )
 
         return {
             "message": (
@@ -1512,3 +1598,189 @@ def get_attendance_history(
         "total": len(results),
         "records": results,
     }
+
+
+# ---------------- PHASE 1: AUDIT & EXPORT ENDPOINTS ----------------
+
+@app.get("/admin/audit-logs")
+def get_audit_logs(
+    action: str | None = Query(default=None),
+    actor_id: str | None = Query(default=None),
+    limit: int = Query(default=100, le=500),
+    user: dict = Depends(require_admin),
+):
+    logs = services.get_audit_logs(supabase, action=action, actor_id=actor_id, limit=limit)
+    return {"total": len(logs), "logs": logs}
+
+
+@app.get("/admin/export/attendance")
+def export_attendance_csv(
+    start_date: Date | None = Query(default=None),
+    end_date: Date | None = Query(default=None),
+    user: dict = Depends(require_admin),
+):
+    assert supabase is not None
+    query = supabase.table("attendance").select("id, staff_id, check_in, check_out, created_at").order("check_in", desc=True)
+    if start_date:
+        start_dt = datetime(start_date.year, start_date.month, start_date.day, tzinfo=INDIA_TIMEZONE)
+        query = query.gte("check_in", start_dt.astimezone(timezone.utc).isoformat())
+    if end_date:
+        end_dt = datetime(end_date.year, end_date.month, end_date.day, tzinfo=INDIA_TIMEZONE) + timedelta(days=1)
+        query = query.lt("check_in", end_dt.astimezone(timezone.utc).isoformat())
+
+    res = query.limit(1000).execute()
+    csv_data = services.export_attendance_csv(res.data or [])
+    filename = f"attendance_export_{Date.today().isoformat()}.csv"
+    return Response(
+        content=csv_data,
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
+@app.get("/admin/export/audit-logs")
+def export_audit_logs_csv(
+    action: str | None = Query(default=None),
+    actor_id: str | None = Query(default=None),
+    user: dict = Depends(require_admin),
+):
+    logs = services.get_audit_logs(supabase, action=action, actor_id=actor_id, limit=1000)
+    csv_data = services.export_audit_logs_csv(logs)
+    filename = f"audit_logs_{Date.today().isoformat()}.csv"
+    return Response(
+        content=csv_data,
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
+@app.get("/admin/export/requests")
+def export_requests_csv(
+    status: str = Query(default="all"),
+    user: dict = Depends(require_admin),
+):
+    requests_list = services.get_all_requests(supabase, status=status)
+    csv_data = services.export_leave_requests_csv(requests_list)
+    filename = f"leave_duty_requests_{Date.today().isoformat()}.csv"
+    return Response(
+        content=csv_data,
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
+# ---------------- PHASE 2: LEAVE & OFF-CAMPUS DUTY APPROVALS ----------------
+
+class CreateLeaveRequestModel(BaseModel):
+    request_type: str = Field(..., pattern="^(leave|duty)$")
+    start_date: str
+    end_date: str
+    reason: str = Field(..., min_length=3, max_length=500)
+
+
+class ReviewLeaveRequestModel(BaseModel):
+    status: str = Field(..., pattern="^(approved|rejected)$")
+    review_comment: str | None = None
+
+
+@app.post("/requests")
+def submit_request(
+    data: CreateLeaveRequestModel,
+    user: dict = Depends(get_current_user),
+):
+    try:
+        start_d = Date.fromisoformat(data.start_date)
+        end_d = Date.fromisoformat(data.end_date)
+    except ValueError:
+        raise HTTPException(400, "Dates must be in YYYY-MM-DD format.")
+
+    if start_d > end_d:
+        raise HTTPException(400, "Start date cannot be after end date.")
+
+    req = services.create_leave_request(
+        supabase,
+        staff_id=user["staff_id"],
+        request_type=data.request_type,
+        start_date=data.start_date,
+        end_date=data.end_date,
+        reason=data.reason,
+    )
+    return {"message": "Request submitted successfully", "request": req}
+
+
+@app.get("/requests/me")
+def list_my_requests(user: dict = Depends(get_current_user)):
+    items = services.get_staff_requests(supabase, user["staff_id"])
+    return {"requests": items}
+
+
+@app.get("/admin/requests")
+def list_all_requests(
+    status: str = Query(default="all"),
+    request_type: str = Query(default="all"),
+    staff_id: str | None = Query(default=None),
+    user: dict = Depends(require_admin),
+):
+    # Auto-check and flag escalations during request review
+    services.check_and_escalate_pending_requests(supabase, deadline_hours=ESCALATION_DEADLINE_HOURS)
+    items = services.get_all_requests(supabase, status=status, request_type=request_type, staff_id=staff_id)
+    return {"total": len(items), "requests": items}
+
+
+@app.patch("/admin/requests/{request_id}/review")
+def review_request(
+    request_id: str,
+    data: ReviewLeaveRequestModel,
+    user: dict = Depends(require_admin),
+):
+    res = services.review_leave_request(
+        supabase,
+        request_id=request_id,
+        reviewer_id=user["staff_id"],
+        status=data.status,
+        review_comment=data.review_comment,
+    )
+    return {"message": f"Request {data.status} successfully.", "result": res}
+
+
+# ---------------- PHASE 3: NOTIFICATIONS & ESCALATION ----------------
+
+@app.get("/notifications")
+def get_user_notifications(
+    limit: int = Query(default=50, le=100),
+    user: dict = Depends(get_current_user),
+):
+    return services.get_notifications(
+        supabase,
+        recipient_id=user["staff_id"],
+        role=user["role"],
+        limit=limit,
+    )
+
+
+@app.patch("/notifications/{notification_id}/read")
+def mark_notification_read(
+    notification_id: str,
+    user: dict = Depends(get_current_user),
+):
+    services.mark_notification_read(supabase, notification_id, user["staff_id"])
+    return {"message": "Notification marked as read."}
+
+
+@app.patch("/notifications/read-all")
+def mark_all_notifications_read(user: dict = Depends(get_current_user)):
+    services.mark_all_notifications_read(supabase, user["staff_id"], user["role"])
+    return {"message": "All notifications marked as read."}
+
+
+@app.post("/admin/requests/check-escalations")
+def trigger_escalation_check(user: dict = Depends(require_admin)):
+    escalated = services.check_and_escalate_pending_requests(
+        supabase,
+        deadline_hours=ESCALATION_DEADLINE_HOURS,
+    )
+    return {
+        "message": f"Escalation check complete. {len(escalated)} requests escalated.",
+        "escalated_count": len(escalated),
+        "escalated": escalated,
+    }

@@ -1861,3 +1861,99 @@ tbody td[colspan] {
     width: 100%;
   }
 }
+
+/* ======================================
+   PHASE 1/2/3 — Audit, Requests, Notifications
+====================================== */
+
+.badge-red {
+  background: #fde8ea;
+  color: var(--red);
+}
+
+.notif-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--red);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 999px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  margin-left: 6px;
+  line-height: 1;
+}
+
+.notif-bell-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px;
+  border: 1.5px solid var(--red);
+  border-radius: 8px;
+  background: #fde8ea;
+  color: var(--red);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.notif-bell-button:hover {
+  background: #fbd0d4;
+}
+
+.notif-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 4px 0;
+}
+
+.notif-item {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 16px;
+  background: var(--white);
+  transition: border-color 0.15s;
+}
+
+.notif-item.notif-unread {
+  border-left: 3px solid var(--primary);
+  background: #f5f8ff;
+}
+
+.notif-item.notif-type-escalation {
+  border-left: 3px solid var(--red);
+  background: #fff8f8;
+}
+
+.notif-item.notif-type-approval.notif-unread {
+  border-left: 3px solid var(--green);
+  background: #f4fbf8;
+}
+
+.notif-item-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 6px;
+  flex-wrap: wrap;
+}
+
+.notif-time {
+  font-size: 12px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.notif-body {
+  margin: 0 0 8px 0;
+  font-size: 14px;
+  color: var(--text);
+  line-height: 1.5;
+}
