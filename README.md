@@ -232,7 +232,19 @@ The frontend's API base URL is currently configured as `http://127.0.0.1:8100`. 
 5. Reset a PIN or activate/deactivate the account as needed.
 6. Use the dashboard and history section to review attendance information.
 
-Demo credentials may exist in a local development database, but they are not guaranteed to be seeded in every environment. If your local setup uses the example accounts `STF001` / `1234` and `ADM001` / `000000`, change these credentials before any real deployment and do not publish real credentials in this README.
+### Administrator provisioning
+
+Automatic demo seeding is disabled in production. Administrators must be provisioned securely using the admin management CLI:
+
+```bash
+# Provision an administrator account
+python manage_admin.py --create --id YOUR_ADMIN_ID --pin YOUR_SECURE_PIN
+
+# To decommission or scramble old demo accounts
+python manage_admin.py --decommission-demo
+```
+
+Demo accounts (`ADM001` and `STF001`) are disabled by default in production.
 
 ## API overview
 

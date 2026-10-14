@@ -48,6 +48,10 @@ MAX_FACE_IMAGE_BYTES = 1_500_000
 ANTI_SPOOFING_ENABLED = (
     os.getenv("ANTI_SPOOFING_ENABLED", "true").lower() in ("true", "1", "yes")
 )
+ENVIRONMENT = os.getenv("ENVIRONMENT", "production").lower()
+ENABLE_DEMO_SEEDING = (
+    os.getenv("ENABLE_DEMO_SEEDING", "false").lower() in ("true", "1", "yes")
+)
 
 INDIA_TIMEZONE = timezone(timedelta(hours=5, minutes=30))
 bearer_scheme = HTTPBearer(auto_error=False)
@@ -370,9 +374,13 @@ def consume_face_proof(
 # ---------------- DATABASE INITIALIZATION ----------------
 
 def seed_demo_users():
-    """Create demo accounts only if they do not already exist."""
+    """Create demo accounts only when explicitly enabled in non-production environments."""
 
     assert supabase is not None
+
+    if ENVIRONMENT == "production" or not ENABLE_DEMO_SEEDING:
+        print("Demo seeding is disabled for production.")
+        return
 
     demo_users = [
         {"staff_id": "STF001", "pin": "1234", "role": "staff"},
@@ -398,7 +406,24 @@ def seed_demo_users():
             "role": demo["role"],
             "pin_salt": salt,
             "pin_hash": hash_pin(demo["pin"], salt),
+            "is_active": False,
         }).execute()
+
+
+def enforce_demo_accounts_disabled():
+    """Keep known demo accounts disabled in production."""
+
+    assert supabase is not None
+
+    demo_ids = ["ADM001", "STF001"]
+
+    for demo_id in demo_ids:
+        try:
+            supabase.table("staff_users").update({
+                "is_active": False,
+            }).eq("staff_id", demo_id).execute()
+        except Exception as error:
+            print(f"Notice: unable to deactivate demo account {demo_id}: {error}")
 
 
 @asynccontextmanager
@@ -425,7 +450,31 @@ async def lifespan(app: FastAPI):
         )
 
     supabase = create_client(url, key)
-    seed_demo_users()
+
+    if ENABLE_DEMO_SEEDING and ENVIRONMENT != "production":
+        seed_demo_users()
+    else:
+        enforce_demo_accounts_disabled()
+
+    # Verify at least one active administrator exists to avoid lockout
+    admin_check = (
+        supabase.table("staff_users")
+        .select("staff_id")
+        .eq("role", "admin")
+        .eq("is_active", True)
+        .limit(1)
+        .execute()
+    )
+
+    if not admin_check.data:
+        print(
+            "CRITICAL WARNING: No active administrator account found in staff_users! "
+            "Run 'python manage_admin.py --create' to provision an admin."
+        )
+    else:
+        print(
+            f"Active administrator account confirmed: {admin_check.data[0]['staff_id']}"
+        )
 
     print(
         "CampusPass geofence enabled: "

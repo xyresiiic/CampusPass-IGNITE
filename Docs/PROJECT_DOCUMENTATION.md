@@ -366,16 +366,17 @@ If the distance is too large, the request is rejected.
 
 ---
 
-## 12. Default demo credentials
+## 12. Administrator provisioning & demo accounts
+ 
+Automatic demo seeding is disabled in production environments (`ENABLE_DEMO_SEEDING=false`).
+ 
+Administrators are created manually using the management CLI script:
+ 
+```bash
+python manage_admin.py --create --id ADMIN_ROOT --pin <YOUR_SECURE_PIN>
+```
 
-The backend can seed demo accounts if they do not already exist.
-
-Included in the code:
-
-- STF001 / 1234
-- ADM001 / 000000
-
-These are local demo credentials and should never be used in a real deployment or public environment.
+Demo accounts (`STF001` and `ADM001`) are permanently deactivated in production (`is_active = False`) and their default PINs scrambled to prevent unauthorized access.
 
 ---
 
