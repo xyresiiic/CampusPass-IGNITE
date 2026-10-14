@@ -1317,6 +1317,12 @@ function App() {
       return;
     }
 
+    const phoneDigits = newStaffPhone.replace(/\D/g, "");
+    if (!phoneDigits || phoneDigits.length < 10) {
+      setStaffError("WhatsApp contact number is mandatory and must contain at least 10 digits.");
+      return;
+    }
+
     setStaffBusy(true);
 
     try {
@@ -1326,7 +1332,12 @@ function App() {
           "Content-Type": "application/json",
           Authorization: `Bearer ${accessToken}`,
         },
-        body: JSON.stringify({ staff_id: cleanId, pin: newStaffPin, full_name: newStaffFullName.trim() || null, phone: newStaffPhone.trim() || null }),
+        body: JSON.stringify({
+          staff_id: cleanId,
+          pin: newStaffPin,
+          phone: newStaffPhone.trim(),
+          full_name: newStaffFullName.trim() || null,
+        }),
       });
 
       const data = await response.json();
@@ -1489,6 +1500,52 @@ function App() {
         error instanceof Error
           ? error.message
           : "Unable to update account status."
+      );
+    } finally {
+      setStaffBusy(false);
+    }
+  }
+
+  async function handleDeleteStaff(staff: StaffAccount) {
+    if (!accessToken) return;
+    const confirmed = window.confirm(
+      `Are you sure you want to permanently delete staff account "${staff.staff_id}"?\n\nThis will remove their profile and login access. This action cannot be undone.`
+    );
+    if (!confirmed) return;
+
+    setStaffBusy(true);
+    setStaffMessage("");
+    setStaffError("");
+
+    try {
+      const response = await fetch(
+        `${API_URL}/admin/staff/${encodeURIComponent(staff.staff_id)}`,
+        {
+          method: "DELETE",
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.detail || "Unable to delete staff account.");
+      }
+
+      setStaffMessage(
+        data.message || `Staff account ${staff.staff_id} deleted successfully.`
+      );
+
+      await loadStaff(accessToken);
+      await loadAdminDashboard(accessToken);
+      await loadAbsenceAlerts(accessToken);
+    } catch (error) {
+      setStaffError(
+        error instanceof Error
+          ? error.message
+          : "Unable to delete staff account."
       );
     } finally {
       setStaffBusy(false);
@@ -2516,7 +2573,7 @@ function App() {
 
                     <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 8, padding: "10px 12px", margin: "10px 0" }}>
                       <label htmlFor="newStaffPhone" style={{ color: "#166534", fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}>
-                        💬 WhatsApp / Contact Number
+                        💬 WhatsApp / Contact Number * (Mandatory)
                       </label>
                       <input
                         id="newStaffPhone"
@@ -2525,11 +2582,13 @@ function App() {
                         value={newStaffPhone}
                         onChange={(event) => setNewStaffPhone(event.target.value)}
                         placeholder="e.g. 9876543210 (10 digits)"
+                        minLength={10}
                         maxLength={15}
+                        required
                         style={{ marginTop: 4, width: "100%", background: "white" }}
                       />
                       <small style={{ color: "#15803d", fontSize: 11, display: "block", marginTop: 4 }}>
-                        ✓ Absence notice messages will be sent to this WhatsApp number if absent &gt; 2 working days.
+                        ✓ Mandatory. Absence alerts will be sent to this WhatsApp number if absent &gt; 2 working days.
                       </small>
                     </div>
 
@@ -2734,14 +2793,30 @@ function App() {
                                 </button>
                               </td>
                               <td>
-                                <button
-                                  className="outline-button"
-                                  type="button"
-                                  disabled={staffBusy}
-                                  onClick={() => void handleToggleStaff(staff)}
-                                >
-                                  {staff.is_active ? "Deactivate" : "Activate"}
-                                </button>
+                                <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                                  <button
+                                    className="outline-button"
+                                    type="button"
+                                    disabled={staffBusy}
+                                    onClick={() => void handleToggleStaff(staff)}
+                                  >
+                                    {staff.is_active ? "Deactivate" : "Activate"}
+                                  </button>
+                                  <button
+                                    className="outline-button"
+                                    type="button"
+                                    disabled={staffBusy}
+                                    title={`Delete ${staff.staff_id}`}
+                                    style={{
+                                      color: "#b91c1c",
+                                      borderColor: "#fca5a5",
+                                      background: "#fef2f2",
+                                    }}
+                                    onClick={() => void handleDeleteStaff(staff)}
+                                  >
+                                    Delete
+                                  </button>
+                                </div>
                               </td>
                             </tr>
                           );

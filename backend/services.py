@@ -935,6 +935,18 @@ def save_staff_profile(
     return {"staff_id": normalized_id, "full_name": curr_name, "phone": curr_phone}
 
 
+def delete_staff_profile(supabase: Optional[Client], staff_id: str) -> None:
+    """Remove staff profile from local SQLite cache."""
+    normalized_id = staff_id.strip().upper()
+    try:
+        conn = _get_sqlite_conn()
+        with conn:
+            conn.execute("DELETE FROM staff_profiles WHERE staff_id = ?", (normalized_id,))
+        conn.close()
+    except Exception as e:
+        print(f"Error removing profile from local DB: {e}")
+
+
 def get_staff_list_with_profiles(supabase: Optional[Client]) -> list[dict[str, Any]]:
     """Fetch staff users safely and merge with profile names & phone numbers."""
     profiles = get_staff_profiles_map()

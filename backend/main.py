@@ -1337,8 +1337,8 @@ def admin_dashboard(user: dict = Depends(require_admin)):
 class CreateStaffRequest(BaseModel):
     staff_id: str
     pin: str
+    phone: str
     full_name: str | None = None
-    phone: str | None = None
 
 
 class ResetStaffPinRequest(BaseModel):
@@ -1393,6 +1393,14 @@ def create_staff(
                 "Staff ID can contain only letters, numbers, "
                 "and underscores."
             ),
+        )
+
+    phone = (data.phone or "").strip()
+    digits_only = "".join(filter(str.isdigit, phone))
+    if len(digits_only) < 10:
+        raise HTTPException(
+            status_code=400,
+            detail="WhatsApp contact number is mandatory and must contain at least 10 digits.",
         )
 
     validate_staff_pin(pin)
@@ -1580,6 +1588,71 @@ def update_staff_status(
         raise HTTPException(
             status_code=503,
             detail="Unable to update staff status.",
+        )
+
+
+@app.delete("/admin/staff/{staff_id}")
+def delete_staff(
+    staff_id: str,
+    user: dict = Depends(require_admin),
+):
+    assert supabase is not None
+    normalized_id = staff_id.strip().upper()
+
+    if normalized_id == user["staff_id"].strip().upper():
+        raise HTTPException(
+            status_code=400,
+            detail="You cannot delete your own logged-in admin account.",
+        )
+
+    try:
+        existing = (
+            supabase.table("staff_users")
+            .select("staff_id, role")
+            .eq("staff_id", normalized_id)
+            .limit(1)
+            .execute()
+        )
+
+        if not existing.data:
+            raise HTTPException(
+                status_code=404,
+                detail="Staff account not found.",
+            )
+
+        if existing.data[0].get("role") == "admin":
+            raise HTTPException(
+                status_code=403,
+                detail="Administrator accounts cannot be deleted from here.",
+            )
+
+        # Delete staff user from Supabase
+        supabase.table("staff_users").delete().eq("staff_id", normalized_id).execute()
+
+        # Delete from local SQLite profiles
+        services.delete_staff_profile(supabase, normalized_id)
+
+        services.log_audit_event(
+            supabase,
+            actor_id=user["staff_id"],
+            actor_role="admin",
+            action="DELETE_STAFF",
+            target_type="staff",
+            target_id=normalized_id,
+        )
+
+        return {
+            "message": f"Staff account {normalized_id} deleted successfully.",
+            "staff_id": normalized_id,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as error:
+        print(f"Delete staff error: {error}")
+        raise HTTPException(
+            status_code=503,
+            detail="Unable to delete staff account.",
         )
 
 
