@@ -10,6 +10,7 @@ import uuid
 import numpy as np
 import cv2
 from deepface import DeepFace
+from deepface.modules.exceptions import SpoofDetected
 
 from datetime import datetime, timedelta, timezone, date as Date
 from contextlib import asynccontextmanager
@@ -44,6 +45,9 @@ FACE_DISTANCE_THRESHOLD = float(
 )
 FACE_PROOF_VALID_SECONDS = 90
 MAX_FACE_IMAGE_BYTES = 1_500_000
+ANTI_SPOOFING_ENABLED = (
+    os.getenv("ANTI_SPOOFING_ENABLED", "true").lower() in ("true", "1", "yes")
+)
 
 INDIA_TIMEZONE = timezone(timedelta(hours=5, minutes=30))
 bearer_scheme = HTTPBearer(auto_error=False)
@@ -197,8 +201,11 @@ def decode_face_image(image_data: str) -> np.ndarray:
     return frame
 
 
-def extract_face_embedding(image_data: str) -> list[float]:
-    """Extract one face embedding using DeepFace."""
+def extract_face_embedding(
+    image_data: str,
+    enforce_anti_spoofing: bool = False,
+) -> list[float]:
+    """Extract one face embedding using DeepFace with optional anti-spoofing."""
 
     frame = decode_face_image(image_data)
 
@@ -209,7 +216,19 @@ def extract_face_embedding(image_data: str) -> list[float]:
             detector_backend="opencv",
             enforce_detection=True,
             align=True,
+            anti_spoofing=enforce_anti_spoofing,
         )
+    except SpoofDetected as error:
+        print(f"Anti-spoofing check rejected image: {error}")
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Spoofing detected: 2D photograph or screen replay rejected. "
+                "Please face the live camera in person."
+            ),
+        )
+    except HTTPException:
+        raise
     except Exception as error:
         print(f"Face extraction error: {error}")
 
@@ -415,6 +434,10 @@ async def lifespan(app: FastAPI):
         f"radius={CAMPUS_RADIUS_METERS} metres"
     )
     print(f"Face verification enabled with model: {FACE_MODEL_NAME}")
+    print(
+        "Anti-spoofing liveness protection: "
+        f"{'ENABLED (MiniFASNet)' if ANTI_SPOOFING_ENABLED else 'DISABLED'}"
+    )
 
     yield
 
@@ -429,6 +452,8 @@ app.add_middleware(
         "https://campuspass-ignite.vercel.app",
         "http://localhost:5180",
         "http://127.0.0.1:5180",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -657,7 +682,10 @@ def enroll_staff_face(
                 detail="This staff account is inactive.",
             )
 
-        embedding = extract_face_embedding(data.image)
+        embedding = extract_face_embedding(
+            data.image,
+            enforce_anti_spoofing=ANTI_SPOOFING_ENABLED,
+        )
 
         existing = (
             supabase.table("staff_face_profiles")
@@ -783,7 +811,10 @@ def verify_face(
                 ),
             )
 
-        current_embedding = extract_face_embedding(data.image)
+        current_embedding = extract_face_embedding(
+            data.image,
+            enforce_anti_spoofing=ANTI_SPOOFING_ENABLED,
+        )
 
         distance = cosine_distance(
             profile["embedding"],

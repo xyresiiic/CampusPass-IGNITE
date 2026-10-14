@@ -820,6 +820,14 @@ function App() {
           setAttendanceMessage(
             "Your GPS accuracy is too low. Move to an open area and try again."
           );
+        } else if (
+          normalized.includes("spoof") ||
+          normalized.includes("photo") ||
+          normalized.includes("screen replay")
+        ) {
+          setAttendanceMessage(
+            "⚠️ Spoofing detected: 2D photograph or screen replay rejected. Please face the live camera in person."
+          );
         } else {
           setAttendanceMessage(detail);
         }
@@ -856,11 +864,23 @@ function App() {
       setFaceProof("");
       setFaceProofAction(null);
 
-      setAttendanceMessage(
+      const rawError =
         error instanceof Error
           ? error.message
-          : "Attendance request failed. Please try again."
-      );
+          : "Attendance request failed. Please try again.";
+      const lower = rawError.toLowerCase();
+
+      if (
+        lower.includes("spoof") ||
+        lower.includes("photo") ||
+        lower.includes("screen replay")
+      ) {
+        setAttendanceMessage(
+          "⚠️ Spoofing detected: 2D photograph or screen replay rejected. Please face the live camera in person."
+        );
+      } else {
+        setAttendanceMessage(rawError);
+      }
     } finally {
       setAttendanceBusy(false);
     }
@@ -1341,8 +1361,8 @@ function App() {
               <span className="eyebrow">FACE VERIFICATION</span>
               <h2>Look directly at the camera</h2>
               <p className="muted">
-                Keep your face clearly visible in good lighting. Face
-                matching runs when you confirm check-in or check-out.
+                Keep your face clearly visible in good lighting. Live 3D facial
+                verification protects against photos and screen replays.
               </p>
             </div>
 
