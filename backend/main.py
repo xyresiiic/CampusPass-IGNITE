@@ -47,7 +47,7 @@ FACE_DISTANCE_THRESHOLD = float(
 FACE_PROOF_VALID_SECONDS = 90
 MAX_FACE_IMAGE_BYTES = 1_500_000
 ANTI_SPOOFING_ENABLED = (
-    os.getenv("ANTI_SPOOFING_ENABLED", "false").lower() in ("true", "1", "yes")
+    os.getenv("ANTI_SPOOFING_ENABLED", "true").lower() in ("true", "1", "yes")
 )
 ENVIRONMENT = os.getenv("ENVIRONMENT", "production").lower()
 ENABLE_DEMO_SEEDING = (
