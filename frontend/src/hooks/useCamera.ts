@@ -114,13 +114,22 @@ export function useCamera({ autoStart = true, initialFacingMode = "user" }: UseC
       const srcW = video.videoWidth;
       const srcH = video.videoHeight;
 
-      // Ensure minimum 480px on the short edge so MiniFASNet and face models
-      // have enough resolution. Scale up only if below threshold.
-      const MIN_EDGE = 480;
-      const shortEdge = Math.min(srcW, srcH);
-      const scale = shortEdge < MIN_EDGE ? MIN_EDGE / shortEdge : 1;
-      const outW = Math.round(srcW * scale);
-      const outH = Math.round(srcH * scale);
+      // Bound maximum resolution to 720px to keep payload size lightweight (<80KB),
+      // ensure fast upload, prevent OOM on server, and minimize latency.
+      const MAX_EDGE = 720;
+      const MIN_EDGE = 320;
+      const longestEdge = Math.max(srcW, srcH);
+      const shortestEdge = Math.min(srcW, srcH);
+
+      let scale = 1;
+      if (longestEdge > MAX_EDGE) {
+        scale = MAX_EDGE / longestEdge;
+      } else if (shortestEdge < MIN_EDGE) {
+        scale = MIN_EDGE / shortestEdge;
+      }
+
+      const outW = Math.max(Math.round(srcW * scale), 160);
+      const outH = Math.max(Math.round(srcH * scale), 160);
 
       const canvas = document.createElement("canvas");
       canvas.width = outW;
@@ -131,21 +140,13 @@ export function useCamera({ autoStart = true, initialFacingMode = "user" }: UseC
         throw new Error("Failed to initialize canvas context for photo capture.");
       }
 
-      // Front camera (user-facing) streams are mirrored by the browser so
-      // the live preview looks natural in a mirror. The CSS transform is
-      // purely cosmetic — the raw pixel data coming out of the MediaStream
-      // is already horizontally flipped.  Face recognition and anti-spoofing
-      // models (MiniFASNet, Facenet512) expect a geometrically correct face.
-      // We un-flip here so the backend receives a natural, un-mirrored image.
-      if (facingMode === "user") {
-        ctx.translate(outW, 0);
-        ctx.scale(-1, 1);
-      }
-
+      // Draw the natural camera stream directly onto the canvas.
+      // Note: Video preview is mirrored visually via CSS for user comfort,
+      // but facial recognition models require the real, un-mirrored perspective.
       ctx.drawImage(video, 0, 0, outW, outH);
       return canvas.toDataURL("image/jpeg", quality);
     },
-    [facingMode]
+    []
   );
 
   useEffect(() => {
