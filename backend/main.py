@@ -347,13 +347,42 @@ def extract_face_embedding(
                     ),
                 )
 
-    if representations is None or len(representations) != 1:
+    if not representations:
         raise HTTPException(
             status_code=400,
-            detail="Please ensure exactly one face is visible.",
+            detail="No clear face detected. Face the camera in good lighting and try again.",
         )
 
-    embedding = representations[0].get("embedding")
+    # When multiple faces are visible (e.g. classmates, colleagues, or bystanders in the background),
+    # select the primary foreground face closest to the camera and centered in the frame.
+    h_frame, w_frame = frame.shape[:2]
+
+    def face_prominence(item: dict) -> float:
+        box = item.get("facial_area") or {}
+        w = float(box.get("w", 0))
+        h = float(box.get("h", 0))
+        area = w * h
+
+        # Center distance penalty: the user is centered in the oval guide
+        cx = float(box.get("x", 0)) + (w / 2.0)
+        cy = float(box.get("y", 0)) + (h / 2.0)
+        dx = cx - (w_frame / 2.0)
+        dy = cy - (h_frame / 2.0)
+        dist_from_center = math.hypot(dx, dy)
+        center_factor = 1.0 / (1.0 + (dist_from_center / max(w_frame, 1)))
+
+        return area * center_factor
+
+    primary_face = max(representations, key=face_prominence)
+    box = primary_face.get("facial_area") or {}
+
+    if box.get("w", 0) < 40 or box.get("h", 0) < 40:
+        raise HTTPException(
+            status_code=400,
+            detail="Face is too far away. Please move closer to the camera.",
+        )
+
+    embedding = primary_face.get("embedding")
 
     if embedding is None:
         raise HTTPException(
