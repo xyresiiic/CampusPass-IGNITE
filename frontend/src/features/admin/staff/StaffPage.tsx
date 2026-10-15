@@ -1,15 +1,13 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useState } from "react";
 import { api } from "../../../api/client";
-import { useCamera, useConfirm, useToast } from "../../../hooks";
+import { useConfirm, useToast } from "../../../hooks";
 import {
   Badge,
   Button,
   Card,
   CardBody,
   EmptyState,
-  FormField,
   Input,
-  Modal,
   Select,
   SkeletonTable,
   Table,
@@ -20,6 +18,9 @@ import {
   TableRow,
 } from "../../../components/ui";
 import type { StaffAccount } from "../../../types";
+import { CreateStaffModal } from "./CreateStaffModal";
+import { ResetPinModal } from "./ResetPinModal";
+import { EnrollFaceModal } from "./EnrollFaceModal";
 
 export function StaffPage() {
   const [staffList, setStaffList] = useState<StaffAccount[]>([]);
@@ -27,31 +28,16 @@ export function StaffPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">("all");
 
-  // Create Staff Form State
-  const [newStaffId, setNewStaffId] = useState("");
-  const [newFullName, setNewFullName] = useState("");
-  const [newPhone, setNewPhone] = useState("");
-  const [newPin, setNewPin] = useState("");
-  const [isCreating, setIsCreating] = useState(false);
+  // Modals state
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [resetTargetStaffId, setResetTargetStaffId] = useState<string | null>(null);
+  const [enrollingStaff, setEnrollingStaff] = useState<StaffAccount | null>(null);
 
   // Edit Inline Profile State
   const [editingStaffId, setEditingStaffId] = useState<string | null>(null);
   const [editFullName, setEditFullName] = useState("");
   const [editPhone, setEditPhone] = useState("");
   const [isSavingEdit, setIsSavingEdit] = useState(false);
-
-  // Reset PIN Modal State
-  const [resetTargetStaffId, setResetTargetStaffId] = useState<string | null>(null);
-  const [resetPinValue, setResetPinValue] = useState("");
-  const [isResettingPin, setIsResettingPin] = useState(false);
-
-  // Face Enrollment Modal State
-  const [enrollingStaff, setEnrollingStaff] = useState<StaffAccount | null>(null);
-  const { videoRef, isReady, error: cameraError, startCamera, stopCamera, captureFrame } = useCamera({
-    autoStart: false,
-  });
-  const [isEnrollingFace, setIsEnrollingFace] = useState(false);
 
   const toast = useToast();
   const confirm = useConfirm();
@@ -73,47 +59,6 @@ export function StaffPage() {
     }
   }
 
-  // Handle Create Staff Account
-  async function handleCreateStaff(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    const cleanId = newStaffId.trim().toUpperCase();
-
-    if (!cleanId) {
-      toast.error("Staff ID is required.");
-      return;
-    }
-    if (!/^\d{4,12}$/.test(newPin)) {
-      toast.error("PIN must be 4 to 12 digits (numeric only).");
-      return;
-    }
-    const cleanPhone = newPhone.replace(/\D/g, "");
-    if (!cleanPhone || cleanPhone.length < 10) {
-      toast.error("WhatsApp contact number is mandatory and must contain at least 10 digits.");
-      return;
-    }
-
-    setIsCreating(true);
-    try {
-      await api.createStaff({
-        staff_id: cleanId,
-        pin: newPin,
-        phone: newPhone.trim(),
-        full_name: newFullName.trim() || null,
-      });
-      toast.success(`Staff account ${cleanId} created successfully!`);
-      setShowCreateModal(false);
-      setNewStaffId("");
-      setNewFullName("");
-      setNewPhone("");
-      setNewPin("");
-      void loadStaff();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to create staff account.");
-    } finally {
-      setIsCreating(false);
-    }
-  }
-
   // Handle Save Staff Profile Edit
   async function handleSaveProfile(staffId: string) {
     setIsSavingEdit(true);
@@ -129,29 +74,6 @@ export function StaffPage() {
       toast.error(err instanceof Error ? err.message : "Failed to update profile.");
     } finally {
       setIsSavingEdit(false);
-    }
-  }
-
-  // Handle Reset PIN
-  async function handleResetPin(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    if (!resetTargetStaffId) return;
-
-    if (!/^\d{4,12}$/.test(resetPinValue)) {
-      toast.error("PIN must be 4 to 12 digits (numeric only).");
-      return;
-    }
-
-    setIsResettingPin(true);
-    try {
-      await api.resetStaffPin(resetTargetStaffId, resetPinValue);
-      toast.success(`PIN reset successfully for ${resetTargetStaffId}!`);
-      setResetTargetStaffId(null);
-      setResetPinValue("");
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to reset PIN.");
-    } finally {
-      setIsResettingPin(false);
     }
   }
 
@@ -199,34 +121,6 @@ export function StaffPage() {
       void loadStaff();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to delete account.");
-    }
-  }
-
-  // Open & Close Face Enrollment
-  function handleOpenEnrollment(staff: StaffAccount) {
-    setEnrollingStaff(staff);
-    void startCamera();
-  }
-
-  function handleCloseEnrollment() {
-    stopCamera();
-    setEnrollingStaff(null);
-  }
-
-  async function handleCaptureAndEnrollFace() {
-    if (!enrollingStaff) return;
-    setIsEnrollingFace(true);
-
-    try {
-      const imageBase64 = captureFrame(0.9);
-      await api.enrollStaffFace(enrollingStaff.staff_id, imageBase64);
-      toast.success(`Face enrolled successfully for ${enrollingStaff.staff_id}!`);
-      handleCloseEnrollment();
-      void loadStaff();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Face enrollment failed.");
-    } finally {
-      setIsEnrollingFace(false);
     }
   }
 
@@ -389,7 +283,7 @@ export function StaffPage() {
                           variant="outline"
                           size="sm"
                           disabled={!staff.is_active}
-                          onClick={() => handleOpenEnrollment(staff)}
+                          onClick={() => setEnrollingStaff(staff)}
                         >
                           📷 Enroll Face
                         </Button>
@@ -401,10 +295,7 @@ export function StaffPage() {
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => {
-                              setResetTargetStaffId(staff.staff_id);
-                              setResetPinValue("");
-                            }}
+                            onClick={() => setResetTargetStaffId(staff.staff_id)}
                           >
                             Reset PIN
                           </Button>
@@ -435,172 +326,24 @@ export function StaffPage() {
         </CardBody>
       </Card>
 
-      {/* Create Staff Modal */}
-      {showCreateModal && (
-        <Modal
-          isOpen={showCreateModal}
-          onClose={() => setShowCreateModal(false)}
-          title="Create New Staff Account"
-          description="Register staff credentials and mandatory WhatsApp contact."
-        >
-          <form onSubmit={handleCreateStaff} style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
-            <FormField id="new-staff-id" label="Staff ID" required hint="e.g. STF005 (uppercase identifier)">
-              <Input
-                id="new-staff-id"
-                value={newStaffId}
-                onChange={(e) => setNewStaffId(e.target.value.toUpperCase())}
-                placeholder="STF005"
-                minLength={3}
-                maxLength={30}
-                required
-                autoFocus
-              />
-            </FormField>
+      {/* Modals */}
+      <CreateStaffModal
+        isOpen={showCreateModal}
+        onClose={() => setShowCreateModal(false)}
+        onSuccess={() => void loadStaff()}
+      />
 
-            <FormField id="new-full-name" label="Full Name (Optional)">
-              <Input
-                id="new-full-name"
-                value={newFullName}
-                onChange={(e) => setNewFullName(e.target.value)}
-                placeholder="Dr. Anand Verma"
-                maxLength={100}
-              />
-            </FormField>
+      <ResetPinModal
+        staffId={resetTargetStaffId}
+        onClose={() => setResetTargetStaffId(null)}
+        onSuccess={() => void loadStaff()}
+      />
 
-            <FormField
-              id="new-phone"
-              label="WhatsApp Contact Number"
-              required
-              hint="Mandatory. Used for automated absence alerts if absent > 2 days."
-            >
-              <Input
-                id="new-phone"
-                type="tel"
-                value={newPhone}
-                onChange={(e) => setNewPhone(e.target.value)}
-                placeholder="9876543210 (10+ digits)"
-                minLength={10}
-                maxLength={15}
-                required
-              />
-            </FormField>
-
-            <FormField id="new-pin" label="Initial Account PIN" required hint="4 to 12 digits (numeric only)">
-              <Input
-                id="new-pin"
-                type="password"
-                inputMode="numeric"
-                value={newPin}
-                onChange={(e) => setNewPin(e.target.value)}
-                placeholder="4–12 digit PIN"
-                minLength={4}
-                maxLength={12}
-                pattern="[0-9]{4,12}"
-                required
-              />
-            </FormField>
-
-            <div style={{ marginTop: "var(--space-3)", display: "flex", justifyContent: "flex-end", gap: "var(--space-2)" }}>
-              <Button variant="outline" onClick={() => setShowCreateModal(false)}>
-                Cancel
-              </Button>
-              <Button type="submit" variant="primary" isLoading={isCreating}>
-                Create Staff Account
-              </Button>
-            </div>
-          </form>
-        </Modal>
-      )}
-
-      {/* Reset PIN Modal */}
-      {resetTargetStaffId && (
-        <Modal
-          isOpen={!!resetTargetStaffId}
-          onClose={() => setResetTargetStaffId(null)}
-          title={`Reset PIN for ${resetTargetStaffId}`}
-          description="Set a new numeric access PIN for this account."
-        >
-          <form onSubmit={handleResetPin} style={{ display: "flex", flexDirection: "column", gap: "var(--space-4)" }}>
-            <FormField id="reset-pin" label="New Account PIN" required hint="4 to 12 digits (numeric only)">
-              <Input
-                id="reset-pin"
-                type="password"
-                inputMode="numeric"
-                value={resetPinValue}
-                onChange={(e) => setResetPinValue(e.target.value)}
-                placeholder="Enter new 4–12 digit PIN"
-                minLength={4}
-                maxLength={12}
-                pattern="[0-9]{4,12}"
-                autoFocus
-                required
-              />
-            </FormField>
-
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: "var(--space-2)" }}>
-              <Button variant="outline" onClick={() => setResetTargetStaffId(null)}>
-                Cancel
-              </Button>
-              <Button type="submit" variant="primary" isLoading={isResettingPin}>
-                Save New PIN
-              </Button>
-            </div>
-          </form>
-        </Modal>
-      )}
-
-      {/* Face Enrollment Camera Modal */}
-      {enrollingStaff && (
-        <Modal
-          isOpen={!!enrollingStaff}
-          onClose={handleCloseEnrollment}
-          title={`Enroll Face: ${enrollingStaff.staff_id}`}
-          description="Ensure the staff member is in view with good lighting and directly facing the camera."
-        >
-          <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-4)" }}>
-            <div className="camera-scanner-card" style={{ maxHeight: "300px" }}>
-              {cameraError ? (
-                <div className="camera-error-container">
-                  <div className="camera-error-icon">!</div>
-                  <h4 className="camera-error-title">Camera Unavailable</h4>
-                  <p className="camera-error-msg">{cameraError}</p>
-                  <Button variant="outline" size="sm" onClick={() => void startCamera()}>
-                    Retry Camera
-                  </Button>
-                </div>
-              ) : (
-                <>
-                  <video
-                    ref={videoRef}
-                    autoPlay
-                    playsInline
-                    muted
-                    aria-label="Staff face enrollment preview"
-                    className="camera-preview-video"
-                  />
-                  <div className="camera-guide-overlay">
-                    <div className="camera-guide-oval" />
-                  </div>
-                </>
-              )}
-            </div>
-
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: "var(--space-2)" }}>
-              <Button variant="outline" onClick={handleCloseEnrollment} disabled={isEnrollingFace}>
-                Cancel
-              </Button>
-              <Button
-                variant="primary"
-                disabled={!isReady || !!cameraError}
-                isLoading={isEnrollingFace}
-                onClick={() => void handleCaptureAndEnrollFace()}
-              >
-                {isEnrollingFace ? "Enrolling Face..." : "Capture & Enroll Profile"}
-              </Button>
-            </div>
-          </div>
-        </Modal>
-      )}
+      <EnrollFaceModal
+        staff={enrollingStaff}
+        onClose={() => setEnrollingStaff(null)}
+        onSuccess={() => void loadStaff()}
+      />
     </div>
   );
 }

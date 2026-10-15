@@ -1,0 +1,95 @@
+/* Table & Responsive Scroll */
+.ui-table-container {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.ui-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: var(--text-sm);
+}
+
+.ui-table th {
+  padding: var(--space-3) var(--space-4);
+  font-weight: 600;
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  background: var(--surface-card-subtle);
+  border-bottom: 1px solid var(--border-subtle);
+  white-space: nowrap;
+}
+
+.ui-table td {
+  padding: 14px var(--space-4);
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+  vertical-align: middle;
+}
+
+.ui-table tbody tr {
+  transition: background var(--duration-fast) var(--ease-standard);
+}
+
+.ui-table tbody tr:hover {
+  background: var(--surface-card-hover);
+}
+
+/* EmptyState */
+.ui-empty-state {
+  text-align: center;
+  padding: var(--space-12) var(--space-6);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.ui-empty-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--surface-card-subtle);
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--text-xl);
+  margin-bottom: var(--space-3);
+}
+
+.ui-empty-title {
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: var(--space-1);
+}
+
+.ui-empty-description {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  max-width: 380px;
+  margin-bottom: var(--space-4);
+}
+
+/* Skeleton Loader */
+.ui-skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--surface-card-subtle) 25%,
+    var(--border-subtle) 50%,
+    var(--surface-card-subtle) 75%
+  );
+  background-size: 200% 100%;
+  animation: ui-shimmer 1.5s infinite;
+  border-radius: var(--radius-sm);
+}
+
+@keyframes ui-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}

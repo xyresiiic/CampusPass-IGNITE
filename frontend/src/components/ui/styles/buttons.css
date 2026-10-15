@@ -1,0 +1,99 @@
+/* Buttons */
+.ui-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  font-family: var(--font-body);
+  font-weight: 600;
+  border-radius: var(--radius-md);
+  border: 1px solid transparent;
+  transition: all var(--duration-fast) var(--ease-standard);
+  user-select: none;
+  white-space: nowrap;
+  line-height: 1;
+  text-decoration: none;
+}
+
+.ui-button-md {
+  height: 42px;
+  padding: 0 var(--space-4);
+  font-size: var(--text-sm);
+}
+
+.ui-button-sm {
+  height: 32px;
+  padding: 0 var(--space-3);
+  font-size: var(--text-xs);
+  border-radius: var(--radius-sm);
+}
+
+.ui-button-lg {
+  height: 50px;
+  padding: 0 var(--space-6);
+  font-size: var(--text-base);
+  border-radius: var(--radius-lg);
+}
+
+.ui-button-primary {
+  background: var(--brand-primary);
+  color: var(--text-on-brand);
+  border-color: transparent;
+  box-shadow: var(--shadow-sm);
+}
+
+.ui-button-primary:hover:not(:disabled) {
+  background: var(--brand-primary-hover);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
+}
+
+.ui-button-primary:active:not(:disabled) {
+  background: var(--brand-primary-active);
+  transform: translateY(0);
+}
+
+.ui-button-outline {
+  background: var(--surface-card);
+  color: var(--text-primary);
+  border-color: var(--border-subtle);
+}
+
+.ui-button-outline:hover:not(:disabled) {
+  background: var(--surface-card-subtle);
+  border-color: var(--border-strong);
+}
+
+.ui-button-ghost {
+  background: transparent;
+  color: var(--text-secondary);
+}
+
+.ui-button-ghost:hover:not(:disabled) {
+  background: var(--brand-primary-soft);
+  color: var(--brand-primary);
+}
+
+.ui-button-danger {
+  background: var(--color-danger);
+  color: var(--text-on-brand);
+}
+
+.ui-button-danger:hover:not(:disabled) {
+  background: var(--color-danger-hover);
+  box-shadow: var(--shadow-md);
+}
+
+.ui-button-danger-outline {
+  background: var(--surface-card);
+  color: var(--color-danger);
+  border-color: var(--color-danger-border);
+}
+
+.ui-button-danger-outline:hover:not(:disabled) {
+  background: var(--color-danger-soft);
+}
+
+.ui-button-full {
+  width: 100%;
+}
