@@ -1154,25 +1154,28 @@ def get_absence_alerts(
 ) -> list[dict[str, Any]]:
     """
     Detect active staff who have been absent for *more than* threshold_days
-    consecutive working days ending yesterday (IST).
+    consecutive working days (IST).
+
+    Staff who are present today or on approved leave today are NOT considered absent.
+    Working days before a staff member's account was created are not counted against them.
 
     Returns a list of alert dicts:
       { staff_id, full_name, phone, consecutive_absent_days, absent_since }
     """
     from datetime import date as DT, timedelta
 
-    today_ist = datetime.now(INDIA_TIMEZONE).date()
-    yesterday = today_ist - timedelta(days=1)
+    now_ist = datetime.now(INDIA_TIMEZONE)
+    today_ist = now_ist.date()
 
     # Collect all holiday dates across the years covered by lookback
-    holiday_years = {(yesterday - timedelta(days=i)).year for i in range(lookback_days + 5)}
+    holiday_years = {(today_ist - timedelta(days=i)).year for i in range(lookback_days + 10)}
     holiday_dates: set = set()
     for yr in holiday_years:
         holiday_dates |= get_college_holidays(supabase, yr)
 
     # Build the list of working days to check (newest first, up to lookback_days)
     working_days = []
-    d = yesterday
+    d = today_ist
     while len(working_days) < lookback_days:
         if _is_working_day(d, holiday_dates):
             working_days.append(d)
@@ -1182,18 +1185,21 @@ def get_absence_alerts(
     all_staff = get_staff_list_with_profiles(supabase)
     staff_list = [s for s in all_staff if s.get("is_active", True)]
 
-    # Fetch attendance records for the lookback window
-    window_start = (working_days[-1] if working_days else yesterday).isoformat()
-    window_end   = yesterday.isoformat()
+    # Fetch attendance records for the lookback window (converting UTC timestamps to IST dates)
+    window_start_date = working_days[-1] if working_days else today_ist
+    start_ist = datetime.combine(window_start_date, time.min, tzinfo=INDIA_TIMEZONE)
+    end_ist = datetime.combine(today_ist, time.max, tzinfo=INDIA_TIMEZONE)
+    start_utc = start_ist.astimezone(timezone.utc).isoformat()
+    end_utc = end_ist.astimezone(timezone.utc).isoformat()
 
-    attendance_by_staff: dict[str, set] = {}  # staff_id -> set of date objects present
+    attendance_by_staff: dict[str, set] = {}  # staff_id -> set of IST date objects present
     if supabase is not None:
         try:
             res = (
                 supabase.table("attendance")
                 .select("staff_id, check_in")
-                .gte("check_in", window_start)
-                .lte("check_in", window_end + "T23:59:59")
+                .gte("check_in", start_utc)
+                .lte("check_in", end_utc)
                 .execute()
             )
             for row in (res.data or []):
@@ -1201,14 +1207,18 @@ def get_absence_alerts(
                 ci  = row.get("check_in", "")
                 if sid and ci:
                     try:
-                        d_obj = DT.fromisoformat(ci[:10])
-                        attendance_by_staff.setdefault(sid, set()).add(d_obj)
+                        dt = datetime.fromisoformat(ci.replace("Z", "+00:00"))
+                        ist_date = dt.astimezone(INDIA_TIMEZONE).date()
+                        attendance_by_staff.setdefault(sid, set()).add(ist_date)
                     except Exception:
                         pass
         except Exception:
             pass
 
     # Fetch approved leave requests in the window
+    window_start_str = window_start_date.isoformat()
+    window_end_str   = today_ist.isoformat()
+
     approved_leave_by_staff: dict[str, list[tuple]] = {}  # staff_id -> [(start, end), ...]
     if supabase is not None:
         try:
@@ -1216,8 +1226,8 @@ def get_absence_alerts(
                 supabase.table("leave_requests")
                 .select("staff_id, start_date, end_date")
                 .eq("status", "approved")
-                .lte("start_date", window_end)
-                .gte("end_date", window_start)
+                .lte("start_date", window_end_str)
+                .gte("end_date", window_start_str)
                 .execute()
             )
             for row in (res.data or []):
@@ -1240,7 +1250,7 @@ def get_absence_alerts(
             SELECT staff_id, start_date, end_date FROM leave_requests
             WHERE status='approved' AND start_date <= ? AND end_date >= ?
             """,
-            (window_end, window_start),
+            (window_end_str, window_start_str),
         ).fetchall()
         conn.close()
         for r in rows:
@@ -1267,14 +1277,34 @@ def get_absence_alerts(
         sid = staff.get("staff_id", "")
         if not sid:
             continue
+
         present_days = attendance_by_staff.get(sid, set())
+
+        # If staff is present today or excused today, they are not currently absent!
+        if today_ist in present_days or _is_excused(sid, today_ist):
+            continue
+
+        # Account creation date: do not count working days before staff joined
+        created_date: Optional[DT] = None
+        c_at = staff.get("created_at")
+        if c_at:
+            try:
+                dt_c = datetime.fromisoformat(c_at.replace("Z", "+00:00")).astimezone(INDIA_TIMEZONE)
+                created_date = dt_c.date()
+            except Exception:
+                pass
 
         # Walk newest-first: count consecutive absent (not present, not excused) working days
         consecutive = 0
         absent_since: Optional[str] = None
         for day in working_days:
+            # If the working day is before this staff member's account was created, stop streak
+            if created_date and day < created_date:
+                break
+
             if day in present_days or _is_excused(sid, day):
                 break  # streak ends
+
             consecutive += 1
             absent_since = day.isoformat()
 
