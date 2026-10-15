@@ -155,6 +155,61 @@ def validate_campus_location(location: GPSLocation) -> dict:
 
 # ---------------- FACE RECOGNITION HELPERS ----------------
 
+# Minimum short-edge size (pixels) fed to MiniFASNet.  The model works best
+# at >= 480 px; too-small inputs confuse the depth-texture classifier and
+# produce false "spoof" readings on real webcam frames.
+_LIVENESS_MIN_EDGE = 480
+
+
+def preprocess_for_liveness(frame: np.ndarray) -> np.ndarray:
+    """Return a contrast-normalised, adequately-sized copy of *frame*.
+
+    MiniFASNet (the anti-spoofing backbone used by DeepFace) analyses fine
+    skin-texture patterns.  Compressed webcam/phone JPEG frames frequently
+    arrive with low contrast or at small resolution, which makes the model
+    mistake real faces for printed photos.
+
+    This function:
+    1. Up-scales small frames so the short edge is >= _LIVENESS_MIN_EDGE.
+    2. Applies per-channel CLAHE to restore local contrast lost during JPEG
+       compression.
+    3. Returns the result without modifying the original *frame*.
+    """
+    h, w = frame.shape[:2]
+    short_edge = min(h, w)
+
+    if short_edge < _LIVENESS_MIN_EDGE:
+        scale = _LIVENESS_MIN_EDGE / short_edge
+        new_w = max(int(round(w * scale)), 1)
+        new_h = max(int(round(h * scale)), 1)
+        frame = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_CUBIC)
+
+    # CLAHE on the luminance channel (LAB colour space) – avoids shifting hue.
+    lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
+    l_ch, a_ch, b_ch = cv2.split(lab)
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    l_ch = clahe.apply(l_ch)
+    lab = cv2.merge([l_ch, a_ch, b_ch])
+    enhanced = cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
+
+    return enhanced
+
+
+def _run_represent(
+    img: np.ndarray,
+    anti_spoofing: bool,
+) -> list[dict]:
+    """Thin wrapper around DeepFace.represent – raises raw exceptions."""
+    return DeepFace.represent(
+        img_path=img,
+        model_name=FACE_MODEL_NAME,
+        detector_backend="opencv",
+        enforce_detection=True,
+        align=True,
+        anti_spoofing=anti_spoofing,
+    )
+
+
 def decode_face_image(image_data: str) -> np.ndarray:
     """Decode a base64 image and validate its dimensions."""
 
@@ -211,42 +266,88 @@ def extract_face_embedding(
     image_data: str,
     enforce_anti_spoofing: bool = False,
 ) -> list[float]:
-    """Extract one face embedding using DeepFace with optional anti-spoofing."""
+    """Extract one face embedding using DeepFace with optional anti-spoofing.
+
+    When anti-spoofing is enabled the function uses a two-pass strategy to
+    minimise false positives caused by JPEG compression artefacts, low
+    brightness, or small frame sizes that are common in webcam and phone
+    camera captures:
+
+    Pass 1 — raw decoded frame.
+    Pass 2 — contrast-normalised, resolution-upscaled variant.
+
+    Only if *both* passes raise SpoofDetected is the request rejected as a
+    genuine replay attack.  Real photographs / screen replays will reliably
+    fail both passes.
+    """
 
     frame = decode_face_image(image_data)
+    representations = None
 
-    try:
-        representations = DeepFace.represent(
-            img_path=frame,
-            model_name=FACE_MODEL_NAME,
-            detector_backend="opencv",
-            enforce_detection=True,
-            align=True,
-            anti_spoofing=enforce_anti_spoofing,
-        )
-    except SpoofDetected as error:
-        print(f"Anti-spoofing check rejected image: {error}")
-        raise HTTPException(
-            status_code=403,
-            detail=(
-                "Spoofing detected: 2D photograph or screen replay rejected. "
-                "Please face the live camera in person."
-            ),
-        )
-    except HTTPException:
-        raise
-    except Exception as error:
-        print(f"Face extraction error: {error}")
+    if not enforce_anti_spoofing:
+        # Fast path – skip anti-spoofing machinery entirely.
+        try:
+            representations = _run_represent(frame, anti_spoofing=False)
+        except HTTPException:
+            raise
+        except Exception as error:
+            print(f"Face extraction error: {error}")
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "No clear face detected. Face the camera in good "
+                    "lighting and try again."
+                ),
+            )
+    else:
+        # ---- Pass 1: raw frame with anti-spoofing ----
+        spoof_pass1 = False
+        try:
+            representations = _run_represent(frame, anti_spoofing=True)
+        except SpoofDetected as e1:
+            spoof_pass1 = True
+            print(f"Anti-spoofing pass-1 rejected (will retry with preprocessing): {e1}")
+        except HTTPException:
+            raise
+        except Exception as error:
+            print(f"Face extraction error (pass 1): {error}")
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "No clear face detected. Face the camera in good "
+                    "lighting and try again."
+                ),
+            )
 
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "No clear face detected. Face the camera in good "
-                "lighting and try again."
-            ),
-        )
+        if spoof_pass1:
+            # ---- Pass 2: pre-processed (CLAHE + upscale) with anti-spoofing ----
+            enhanced = preprocess_for_liveness(frame)
+            try:
+                representations = _run_represent(enhanced, anti_spoofing=True)
+                print("Anti-spoofing pass-2 (enhanced frame) accepted – real face confirmed.")
+            except SpoofDetected as e2:
+                print(f"Anti-spoofing pass-2 also rejected – treating as spoof: {e2}")
+                raise HTTPException(
+                    status_code=403,
+                    detail=(
+                        "Liveness check failed: the system could not confirm a "
+                        "live face. Please face the camera directly in natural "
+                        "lighting and try again."
+                    ),
+                )
+            except HTTPException:
+                raise
+            except Exception as error:
+                print(f"Face extraction error (pass 2): {error}")
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "No clear face detected. Ensure you are in good lighting "
+                        "and your face fills the oval guide."
+                    ),
+                )
 
-    if len(representations) != 1:
+    if representations is None or len(representations) != 1:
         raise HTTPException(
             status_code=400,
             detail="Please ensure exactly one face is visible.",

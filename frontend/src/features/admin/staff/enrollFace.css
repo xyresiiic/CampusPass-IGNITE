@@ -1,0 +1,477 @@
+/* ==========================================================================
+   CampusPass Face Enrollment - Mobile-First Responsive Styles
+   ========================================================================== */
+
+.enroll-face-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  width: 100%;
+}
+
+/* Staff Identity Context Card */
+.enroll-staff-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2-5) var(--space-3);
+  background: var(--surface-card-subtle);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+}
+
+.enroll-staff-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2-5);
+  min-width: 0;
+}
+
+.enroll-staff-avatar {
+  width: 38px;
+  height: 38px;
+  border-radius: var(--radius-full);
+  background: linear-gradient(135deg, var(--brand-primary), #6366f1);
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: var(--text-xs);
+  flex-shrink: 0;
+  box-shadow: 0 2px 8px rgba(79, 117, 255, 0.3);
+}
+
+.enroll-staff-name {
+  font-size: var(--text-sm);
+  font-weight: 700;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin: 0;
+}
+
+.enroll-staff-id-pill {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 1px;
+}
+
+/* Viewfinder Viewport Container */
+.enroll-camera-card {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 4 / 4.4;
+  max-height: min(340px, 45vh);
+  background: #050913;
+  border-radius: var(--radius-xl);
+  overflow: hidden;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5), inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  user-select: none;
+  touch-action: manipulation;
+}
+
+.enroll-preview-video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.enroll-preview-video.mirror {
+  transform: scaleX(-1);
+}
+
+.enroll-preview-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  animation: enroll-pop-in 0.2s ease-out;
+}
+
+@keyframes enroll-pop-in {
+  from { opacity: 0; transform: scale(0.97); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+/* Flash effect */
+.enroll-flash-overlay {
+  position: absolute;
+  inset: 0;
+  background: #ffffff;
+  pointer-events: none;
+  opacity: 0;
+  z-index: 20;
+}
+
+.enroll-flash-overlay.active {
+  animation: enroll-camera-flash 0.3s cubic-bezier(0.1, 0.9, 0.2, 1);
+}
+
+@keyframes enroll-camera-flash {
+  0% { opacity: 0.9; }
+  100% { opacity: 0; }
+}
+
+/* Top HUD Controls inside Viewfinder */
+.enroll-hud-top {
+  position: absolute;
+  top: var(--space-2-5);
+  left: var(--space-2-5);
+  right: var(--space-2-5);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  z-index: 10;
+  pointer-events: none;
+}
+
+.enroll-hud-top > * {
+  pointer-events: auto;
+}
+
+.enroll-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: var(--radius-full);
+  background: rgba(5, 10, 20, 0.72);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+}
+
+.enroll-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #10b981;
+  box-shadow: 0 0 8px #10b981;
+  animation: enroll-pulse-dot 1.5s infinite;
+}
+
+.enroll-status-dot.frozen {
+  background: #3b82f6;
+  box-shadow: 0 0 8px #3b82f6;
+  animation: none;
+}
+
+@keyframes enroll-pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.85); }
+}
+
+.enroll-switch-cam-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: var(--radius-full);
+  background: rgba(15, 23, 42, 0.78);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-standard);
+  min-height: 32px;
+}
+
+.enroll-switch-cam-btn:hover {
+  background: rgba(30, 41, 59, 0.95);
+  border-color: rgba(255, 255, 255, 0.4);
+  transform: scale(1.03);
+}
+
+.enroll-switch-cam-btn:active {
+  transform: scale(0.96);
+}
+
+/* Biometric Framing Guide */
+.enroll-guide-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  background: radial-gradient(
+    ellipse 62% 76% at center,
+    transparent 54%,
+    rgba(5, 10, 20, 0.7) 100%
+  );
+}
+
+.enroll-guide-oval {
+  width: 62%;
+  height: 75%;
+  border-radius: 50% / 46%;
+  border: 2px dashed rgba(255, 255, 255, 0.55);
+  box-shadow: 0 0 0 9999px rgba(5, 10, 20, 0.32);
+  position: relative;
+  transition: all var(--duration-normal) var(--ease-standard);
+}
+
+.enroll-guide-oval.ready {
+  border-color: rgba(79, 117, 255, 0.7);
+  box-shadow: 0 0 0 9999px rgba(5, 10, 20, 0.32), 0 0 15px rgba(79, 117, 255, 0.35);
+}
+
+.enroll-guide-oval.scanning {
+  border: 2.5px solid var(--brand-primary);
+  box-shadow: 0 0 0 9999px rgba(5, 10, 20, 0.4), 0 0 24px rgba(79, 117, 255, 0.65);
+  animation: enroll-oval-pulse 1.3s infinite ease-in-out;
+}
+
+.enroll-guide-oval.captured {
+  border: 2.5px solid #10b981;
+  box-shadow: 0 0 0 9999px rgba(5, 10, 20, 0.45), 0 0 20px rgba(16, 185, 129, 0.6);
+}
+
+@keyframes enroll-oval-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.02); }
+}
+
+/* Corner Biometric Tick Marks */
+.enroll-guide-corner {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border-color: #60a5fa;
+  pointer-events: none;
+}
+
+.enroll-guide-corner.tl {
+  top: -8px;
+  left: -8px;
+  border-top: 2.5px solid;
+  border-left: 2.5px solid;
+  border-top-left-radius: 4px;
+}
+
+.enroll-guide-corner.tr {
+  top: -8px;
+  right: -8px;
+  border-top: 2.5px solid;
+  border-right: 2.5px solid;
+  border-top-right-radius: 4px;
+}
+
+.enroll-guide-corner.bl {
+  bottom: -8px;
+  left: -8px;
+  border-bottom: 2.5px solid;
+  border-left: 2.5px solid;
+  border-bottom-left-radius: 4px;
+}
+
+.enroll-guide-corner.br {
+  bottom: -8px;
+  right: -8px;
+  border-bottom: 2.5px solid;
+  border-right: 2.5px solid;
+  border-bottom-right-radius: 4px;
+}
+
+/* Scanner Laser Line */
+.enroll-laser-line {
+  position: absolute;
+  left: 6%;
+  right: 6%;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, #38bdf8, #ffffff, #38bdf8, transparent);
+  box-shadow: 0 0 12px #38bdf8;
+  animation: enroll-laser 1.8s infinite ease-in-out;
+}
+
+@keyframes enroll-laser {
+  0% { top: 12%; opacity: 0.3; }
+  50% { top: 88%; opacity: 1; }
+  100% { top: 12%; opacity: 0.3; }
+}
+
+/* Bottom Hint inside Viewfinder */
+.enroll-hud-bottom {
+  position: absolute;
+  bottom: var(--space-2-5);
+  left: var(--space-3);
+  right: var(--space-3);
+  display: flex;
+  justify-content: center;
+  z-index: 10;
+  pointer-events: none;
+}
+
+.enroll-hint-pill {
+  padding: 4px 12px;
+  border-radius: var(--radius-full);
+  background: rgba(5, 10, 20, 0.78);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #e2e8f0;
+  font-size: 11px;
+  font-weight: 500;
+  text-align: center;
+}
+
+/* Guidance Badges Grid (Phone-Optimized) */
+.enroll-guidance-chips {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-2);
+}
+
+.enroll-chip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 6px 4px;
+  background: var(--surface-card-subtle);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  text-align: center;
+  line-height: 1.2;
+}
+
+/* Camera Error Container */
+.enroll-error-container {
+  padding: var(--space-5) var(--space-4);
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-primary);
+  width: 100%;
+}
+
+.enroll-error-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-full);
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.enroll-error-title {
+  font-size: var(--text-base);
+  font-weight: 700;
+  margin: 0;
+}
+
+.enroll-error-msg {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  max-width: 300px;
+  line-height: 1.4;
+  margin: 0;
+}
+
+/* Modal Actions Layout (Mobile-First) */
+.enroll-actions-group {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  margin-top: var(--space-1);
+}
+
+.enroll-actions-group .btn-cancel {
+  flex: 0 0 auto;
+}
+
+.enroll-actions-group .btn-action {
+  flex: 1 1 auto;
+}
+
+/* Review Mode Notification */
+.enroll-review-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-2) var(--space-3);
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  border-radius: var(--radius-md);
+  color: #10b981;
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+
+/* Fallback Upload Link */
+.enroll-fallback-row {
+  display: flex;
+  justify-content: center;
+  margin-top: -2px;
+}
+
+.enroll-fallback-btn {
+  background: none;
+  border: none;
+  color: var(--brand-primary);
+  font-size: 11px;
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 4px;
+}
+
+.enroll-fallback-btn:hover {
+  color: var(--text-primary);
+}
+
+/* Responsive adjustments for phones (<= 640px) */
+@media (max-width: 640px) {
+  .enroll-camera-card {
+    aspect-ratio: 1 / 1;
+    max-height: min(290px, 40vh);
+    border-radius: var(--radius-lg);
+  }
+
+  .enroll-guidance-chips {
+    gap: var(--space-1-5);
+  }
+
+  .enroll-chip {
+    font-size: 10px;
+    padding: 5px 2px;
+  }
+
+  .enroll-actions-group {
+    flex-direction: row;
+    gap: var(--space-2);
+  }
+
+  .enroll-actions-group button {
+    min-height: 44px;
+    font-size: var(--text-sm);
+  }
+
+  .enroll-staff-banner {
+    padding: var(--space-2);
+  }
+}
