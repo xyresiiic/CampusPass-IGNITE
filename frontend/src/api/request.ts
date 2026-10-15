@@ -1,10 +1,21 @@
 import type { ApiErrorDetail } from "../types";
 
+function isPrivateNetworkHost(hostname: string): boolean {
+  if (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1") return true;
+  if (/^192\.168\.\d{1,3}\.\d{1,3}$/.test(hostname)) return true;
+  if (/^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname)) return true;
+  if (/^172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}$/.test(hostname)) return true;
+  if (hostname.endsWith(".local")) return true;
+  return false;
+}
+
 export function getApiBaseUrl(): string {
   const envUrl = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/+$/, "");
 
   if (typeof window !== "undefined" && window.location) {
     const currentHost = window.location.hostname;
+    const isHttps = window.location.protocol === "https:";
+
     // If accessing from another device (e.g. phone on local Wi-Fi) while
     // VITE_API_URL is configured for loopback (localhost or 127.0.0.1),
     // automatically rewrite the host to point to the current machine.
@@ -15,7 +26,8 @@ export function getApiBaseUrl(): string {
           (parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1") &&
           currentHost &&
           currentHost !== "localhost" &&
-          currentHost !== "127.0.0.1"
+          currentHost !== "127.0.0.1" &&
+          isPrivateNetworkHost(currentHost)
         ) {
           parsed.hostname = currentHost;
           return parsed.origin;
@@ -26,11 +38,13 @@ export function getApiBaseUrl(): string {
       return envUrl;
     }
 
-    if (currentHost && currentHost !== "localhost" && currentHost !== "127.0.0.1") {
+    // Only route to local port 8100 when testing over HTTP on a private local network host
+    if (!isHttps && currentHost && isPrivateNetworkHost(currentHost)) {
       return `http://${currentHost}:8100`;
     }
   }
 
+  // Deployed / production fallback (e.g., https://campuspass-ignite.vercel.app -> Render backend)
   return envUrl || "https://campuspass-ignite.onrender.com";
 }
 
