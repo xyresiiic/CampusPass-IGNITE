@@ -1,199 +1,267 @@
 <div align="center">
 
-# CampusPass
+# 🎓 CampusPass
 
 ### Smart Campus Attendance System
 
-Staff attendance with PIN authentication, face verification, and campus geofencing.
+**Skip the gate. Not the verification.**
 
-[![React](https://img.shields.io/badge/Frontend-React-61DAFB?logo=react&logoColor=white)](https://react.dev/)
-[![FastAPI](https://img.shields.io/badge/Backend-FastAPI-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
-[![Supabase](https://img.shields.io/badge/Database-Supabase-3FCF8E?logo=supabase&logoColor=white)](https://supabase.com/)
+A mobile-friendly staff attendance system combining PIN authentication, face verification, and GPS-based campus geofencing to make attendance more convenient.
+
+<p>
+  <a href="https://campuspass-ignite.vercel.app/"><strong>🌐 Live Demo</strong></a>
+  &nbsp; • &nbsp;
+  <a href="https://github.com/xyresiiic/CampusPass-IGNITE"><strong>💻 Source Code</strong></a>
+  &nbsp; • &nbsp;
+  <a href="https://github.com/xyresiiic/CampusPass-IGNITE/issues"><strong>🐛 Report an Issue</strong></a>
+</p>
+
+[![React](https://img.shields.io/badge/Frontend-React-61DAFB?style=for-the-badge&logo=react&logoColor=black)](https://react.dev/)
+[![TypeScript](https://img.shields.io/badge/Language-TypeScript-3178C6?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![FastAPI](https://img.shields.io/badge/Backend-FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![Supabase](https://img.shields.io/badge/Database-Supabase-3FCF8E?style=for-the-badge&logo=supabase&logoColor=white)](https://supabase.com/)
+[![Vercel](https://img.shields.io/badge/Frontend_Hosted_on-Vercel-000000?style=for-the-badge&logo=vercel&logoColor=white)](https://vercel.com/)
+[![Render](https://img.shields.io/badge/Backend_Hosted_on-Render-46E3B7?style=for-the-badge&logo=render&logoColor=black)](https://render.com/)
 
 </div>
 
-CampusPass is a web-based staff attendance management system built with **React + Vite** on the frontend and **FastAPI** on the backend. Staff can check in and out after PIN sign-in, face verification, and a GPS check against the campus geofence. Administrators can manage staff accounts and review attendance.
+---
 
-> [!NOTE]
-> This README describes the local development setup. Values shown for environment variables are examples; confirm the exact names, database schema, and dependencies against the backend before running the project.
+## ✨ About the Project
 
-## Contents
+**CampusPass** is a smart staff attendance management system developed for the **SKIT College Hackathon**. Traditional attendance processes at campus gates can create queues and delays during busy arrival hours. CampusPass explores a more convenient approach by letting staff complete attendance verification using a phone or supported browser.
 
-- [Overview](#overview)
-- [Features](#features)
-- [Technology stack](#technology-stack)
-- [Project structure](#project-structure)
-- [Requirements](#requirements)
-- [Configuration](#configuration)
-- [Database setup](#database-setup)
-- [Run locally](#run-locally)
-- [How to use](#how-to-use)
-- [API overview](#api-overview)
-- [Attendance validation flow](#attendance-validation-flow)
-- [Security and privacy](#security-and-privacy)
-- [Troubleshooting](#troubleshooting)
-- [Development notes](#development-notes)
-- [Future improvements](#future-improvements)
-- [License](#license)
+Staff sign in with their staff ID and PIN, use the device camera for face verification, and provide a location reading that the backend checks against the configured campus geofence. Authorized administrators can manage staff accounts, enroll face profiles, and review attendance records through a dedicated dashboard.
 
-## Overview
+The project combines a responsive web interface, a FastAPI backend, and a Supabase-hosted PostgreSQL database.
 
-The system is intended to make staff attendance easier to record and administer. Staff sign in with their staff ID and PIN, verify their face using the camera, and submit a check-in or check-out request. The backend validates the request, including the staff member's face-verification proof and GPS location relative to the configured campus area.
+> **Project goal:** Make staff attendance more convenient without treating a simple login or GPS reading as sufficient verification on its own.
 
-Administrators can view an overview, manage staff accounts, enroll a face profile for an active staff member, reset staff PINs, activate or deactivate accounts, and review attendance history.
+## 🖼️ Application Screenshots
 
-## Features
+Explore the CampusPass interface below. These images are loaded directly from the repository's `screenshots/` folder.
 
-### Staff
+<table>
+  <tr>
+    <td width="50%" align="center">
+      <img src="screenshots/ss1.png" alt="CampusPass screenshot 1" width="100%">
+      <br><strong>01 · Welcome / Login</strong>
+    </td>
+    <td width="50%" align="center">
+      <img src="screenshots/ss2.png" alt="CampusPass screenshot 2" width="100%">
+      <br><strong>02 · Staff Attendance</strong>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" align="center">
+      <img src="screenshots/ss3.png" alt="CampusPass screenshot 3" width="100%">
+      <br><strong>03 · History + Leave & Duty request</strong>
+    </td>
+    <td width="50%" align="center">
+      <img src="screenshots/ss4.png" alt="CampusPass screenshot 4" width="100%">
+      <br><strong>04 · Admin Dashboard</strong>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" align="center">
+      <img src="screenshots/ss5.png" alt="CampusPass screenshot 5" width="100%">
+      <br><strong>05 · Staff management</strong>
+    </td>
+    <td width="50%" align="center">
+      <img src="screenshots/ss6.png" alt="CampusPass screenshot 6" width="100%">
+      <br><strong>06 · Audit Trail</strong>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" align="center">
+      <img src="screenshots/ss7.png" alt="CampusPass screenshot 7" width="100%">
+      <br><strong>07 · Absence monitoring</strong>
+    </td>
+    <td width="50%" align="center">
+      <img src="screenshots/ss8.png" alt="CampusPass screenshot 8" width="100%">
+      <br><strong>08 · Attendance History</strong>
+    </td>
+  </tr>
+</table>
 
-- Sign in with a staff ID and PIN.
-- Use the device camera for face verification.
-- Mark check-in and check-out.
-- Validate GPS coordinates against the configured campus geofence.
-- Enforce a minimum GPS accuracy requirement configured on the backend.
-- View attendance records/history where enabled in the current UI.
 
-### Administration
+## 🚀 Features
 
-- Admin authentication and protected admin pages.
-- Dashboard overview and attendance summaries.
-- View the staff list.
-- Create staff accounts.
-- Reset staff PINs.
-- Activate or deactivate staff accounts.
-- Enroll or update a staff member's face profile through the camera.
-- Review attendance history.
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <h3>👤 Staff Experience</h3>
+      <ul>
+        <li>Staff ID and PIN sign-in</li>
+        <li>Camera-based face verification</li>
+        <li>Check-in and check-out workflow</li>
+        <li>GPS-based campus geofencing</li>
+        <li>GPS accuracy validation</li>
+        <li>Clear feedback when a required check fails</li>
+      </ul>
+    </td>
+    <td width="50%" valign="top">
+      <h3>🛡️ Admin Dashboard</h3>
+      <ul>
+        <li>Protected administrator access</li>
+        <li>Dashboard overview and attendance summaries</li>
+        <li>Create and manage staff accounts</li>
+        <li>Reset staff PINs</li>
+        <li>Activate or deactivate accounts</li>
+        <li>Enroll or update face profiles</li>
+        <li>Review attendance history</li>
+      </ul>
+    </td>
+  </tr>
+</table>
 
-### Backend and data
+### 🔐 Authentication and data
 
-- FastAPI REST API.
-- JWT-based authentication for protected endpoints.
-- Supabase-hosted PostgreSQL database.
-- Staff PINs stored as salted PBKDF2-SHA256 hashes (not as plain text).
-- Face profile and attendance face-proof records stored separately from basic staff account data.
+- JWT bearer-token authentication for protected API routes.
+- Staff PINs stored as salted PBKDF2-SHA256 hashes rather than plain text.
+- Supabase-hosted PostgreSQL for application data.
+- Backend validation for attendance requests and configured location rules.
+- Separate storage for staff accounts, face profiles, and attendance face-proof records.
 
-## Technology stack
+## 🔄 How It Works
 
-| Area | Technology |
+```text
+Staff signs in
+     │
+     ▼
+Staff ID + PIN authentication
+     │
+     ▼
+Camera-based face verification
+     │
+     ▼
+Device location is requested
+     │
+     ▼
+Backend checks GPS accuracy and campus geofence
+     │
+     ▼
+Attendance rules are validated
+     │
+     ▼
+Attendance is recorded in Supabase
+     │
+     ▼
+Authorized admin can review attendance
+```
+
+1. **Sign in** — Staff enters their staff ID and PIN.
+2. **Verify identity** — Staff completes the camera-based face verification flow.
+3. **Validate location** — The browser provides a location reading; the backend checks the configured accuracy requirement and campus boundary.
+4. **Record attendance** — The backend applies the relevant attendance rules and records an accepted check-in or check-out.
+5. **Review records** — Authorized administrators manage staff and inspect attendance information in the dashboard.
+
+> **Location note:** GPS accuracy varies with device hardware, browser permissions, buildings, and network conditions. Geofencing helps enforce a configured location rule, but GPS alone is not a guarantee of physical presence.
+
+## 🧰 Technology Stack
+
+| Layer | Technology |
 |---|---|
 | Frontend | React, TypeScript, Vite, CSS |
 | Backend | Python, FastAPI, Uvicorn |
-| Database | PostgreSQL hosted by Supabase |
-| Authentication | PIN login and JWT bearer tokens |
-| Browser capabilities | Camera access and Geolocation API |
+| Database | Supabase-hosted PostgreSQL |
+| Authentication | Staff ID/PIN and JWT bearer tokens |
+| Camera & location | Browser camera and Geolocation APIs |
 | API documentation | FastAPI Swagger UI / OpenAPI |
+| Frontend deployment | Vercel |
+| Backend deployment | Render |
 
-## Project structure
+## 🌐 Live Project
 
-The repository is organized into the following areas:
+| Component | Link |
+|---|---|
+| **Live application** | [campuspass-ignite.vercel.app](https://campuspass-ignite.vercel.app/) |
+| **GitHub repository** | [CampusPass-IGNITE](https://github.com/xyresiiic/CampusPass-IGNITE) |
+| **API documentation (local)** | `http://127.0.0.1:8100/docs` |
+
+The live application depends on the configured frontend, backend, and database services. If the demo is temporarily unavailable, check the hosting logs and environment configuration.
+
+## 📁 Project Structure
 
 ```text
 CampusPass-IGNITE/
-├── backend/     # FastAPI backend
-├── frontend/    # React + Vite frontend
-├── Docs/        # Project documentation
+├── backend/              # FastAPI backend
+├── frontend/             # React + TypeScript + Vite frontend
+├── Docs/                 # Project documentation
+├── screenshots/          # README screenshots
+│   ├── ss1.png
+│   ├── ss2.png
+│   ├── ss3.png
+│   ├── ss4.png
+│   ├── ss5.png
+│   ├── ss6.png
+│   ├── ss7.png
+│   └── ss8.png
+├── requirements.txt      # Python dependencies
+├── pyproject.toml        # Python project configuration
+├── vercel.json           # Vercel configuration
 └── README.md
 ```
 
-Backend modules, migrations, and configuration may be added within their respective folders. Do not commit `.env` files, service-role keys, JWT secrets, or other credentials.
+## ⚙️ Run the Project Locally
 
-## Requirements
+### Prerequisites
 
-Install the following before starting:
+- Git
+- Python version compatible with the backend dependencies
+- Node.js and npm
+- A Supabase project with the required PostgreSQL tables
+- A modern browser with camera and location permissions
 
-- Python 3.10+ (use the version required by your installed dependencies if different).
-- Node.js and npm.
-- A Supabase project with a PostgreSQL database.
-- A modern browser with camera and location permissions.
-- A webcam or phone camera for face enrollment and verification.
+### 1. Clone the repository
 
-Camera and geolocation APIs generally require a secure context. `localhost` is treated as secure by modern browsers for development. For deployment, use HTTPS.
+```bash
+git clone https://github.com/xyresiiic/CampusPass-IGNITE.git
+cd CampusPass-IGNITE
+```
 
-## Configuration
+### 2. Configure the backend
 
-Create a `.env` file in the backend directory (the directory from which you run `main.py`) and set the variables used by your backend. The current project setup uses these configuration values:
+Create a `.env` file in the backend's expected working directory. Use the exact variable names referenced by the current backend code.
+
+Example:
 
 ```dotenv
 SUPABASE_URL=https://YOUR_PROJECT.supabase.co
 SUPABASE_SECRET_KEY=YOUR_SUPABASE_SECRET_KEY
 JWT_SECRET_KEY=REPLACE_WITH_A_LONG_RANDOM_SECRET
-
-# Campus geofence configuration — use the exact variable names
-# referenced in main.py if they differ from these illustrative names.
-CAMPUS_LATITUDE=YOUR_CAMPUS_LATITUDE
-CAMPUS_LONGITUDE=YOUR_CAMPUS_LONGITUDE
-CAMPUS_RADIUS_METERS=YOUR_ALLOWED_RADIUS_IN_METERS
-GPS_MAX_ACCURACY_METERS=50
 ```
 
-**Important:** The campus variable names above are descriptive examples. Check `main.py` and use the exact names it reads. Do not use placeholder values in a running deployment. Set the campus coordinates to the actual campus location and choose a geofence radius appropriate for the site.
+Also configure the campus latitude, longitude, geofence radius, and GPS accuracy limit using the exact variable names read by `main.py`. The values above are placeholders; replace them with your actual configuration.
 
-### Secrets and environment variables
+**Keep secrets private.** Never commit `.env` files, Supabase secret keys, JWT secrets, or other credentials to GitHub. Do not expose backend secrets in frontend variables.
 
-- Keep `.env` out of Git. Add it to `.gitignore`.
-- Never place the Supabase secret/service-role key or JWT secret in frontend code or a `VITE_*` variable.
-- If a secret is accidentally committed, rotate it immediately.
-- Use separate credentials for development and production.
+### 3. Install backend dependencies
 
-## Database setup
-
-CampusPass uses Supabase-hosted PostgreSQL. The current application data model includes the following tables:
-
-| Table | Purpose |
-|---|---|
-| `staff_users` | Staff/admin accounts, role, PIN hash and salt, creation time, and account status where configured |
-| `attendance` | Attendance records, including staff ID, check-in/check-out timestamps, and creation time |
-| `staff_face_profiles` | Face enrollment/profile data associated with a staff member |
-| `attendance_face_proofs` | Face-verification proof associated with attendance attempts/records |
-
-The exact columns and constraints are defined by the backend implementation and database setup. Ensure the tables and required columns exist in Supabase before running the API. Row Level Security (RLS) is enabled in the described setup; configure database policies carefully. The backend secret key has elevated privileges, so it must remain server-side only.
-
-If this is a fresh clone and no migration/schema script is present in the repository, create the tables according to the SQL/schema expected by `main.py` before testing the application. Do not guess column names—use the queries and field names in the backend code as the source of truth.
-
-## Run locally
-
-Open **two terminals** from the project root.
-
-### 1. Start the backend
-
-Create and activate a virtual environment (recommended):
-
-**Windows PowerShell**
-
-```powershell
-py -m venv .venv
-.\.venv\Scripts\Activate.ps1
-```
-
-**macOS/Linux**
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-```
-
-Install backend dependencies. If the repository has a `requirements.txt`, use it:
+From the directory containing `requirements.txt`:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-If there is no dependency file, install the dependencies used by the backend and then create a `requirements.txt` for reproducible installs. At minimum, the known server entry point requires FastAPI and Uvicorn; the application also needs the packages imported by `main.py` for Supabase, JWT, password hashing, face processing, and environment configuration.
+If your Python setup uses a virtual environment, activate it before installing dependencies.
 
-Start the API from the directory containing `main.py`:
+### 4. Start the backend
+
+From the directory containing `main.py`:
 
 ```bash
 python -m uvicorn main:app --reload --host 127.0.0.1 --port 8100
 ```
 
-Backend URLs:
+The local API should be available at:
 
-- API base URL: `http://127.0.0.1:8100`
-- Health/root check: `http://127.0.0.1:8100/health` or `http://127.0.0.1:8100/` (depending on the route)
+- API root: `http://127.0.0.1:8100/`
+- Health check: `http://127.0.0.1:8100/health`
 - Interactive API docs: `http://127.0.0.1:8100/docs`
 - OpenAPI schema: `http://127.0.0.1:8100/openapi.json`
 
-### 2. Start the frontend
+### 5. Start the frontend
 
 Open a second terminal:
 
@@ -203,165 +271,147 @@ npm install
 npm run dev -- --host 127.0.0.1 --port 5180
 ```
 
-Open the Vite URL shown in the terminal, normally:
+Open `http://127.0.0.1:5180` in your browser.
 
-```text
-http://127.0.0.1:5180
-```
+Ensure the frontend API base URL points to the backend and that the backend CORS configuration allows the frontend's local origin. If your repository's current scripts or ports differ, follow the values in the frontend configuration.
 
-The frontend's API base URL is currently configured as `http://127.0.0.1:8100`. If you change the backend host or port, update the corresponding API URL in the frontend and ensure backend CORS allows the frontend origin.
+### 6. Configure the database
 
-## How to use
+CampusPass uses Supabase-hosted PostgreSQL. Make sure the tables and columns expected by the backend exist before testing login, face enrollment, or attendance. Refer to the backend queries and project documentation for the expected schema; do not guess column names.
 
-### Staff attendance
+## 🧑‍💻 Using CampusPass
 
-1. Open the frontend in a supported browser.
-2. Sign in using the staff ID and PIN provisioned for your environment.
-3. Allow camera access when prompted.
-4. Complete face verification.
-5. Allow location access and move to an area where the browser can obtain a sufficiently accurate GPS fix.
-6. Submit check-in or check-out.
-7. If the backend rejects the request, read the on-screen message. Common causes include low GPS accuracy, being outside the campus geofence, missing face verification, or an inactive account.
+### Staff workflow
 
-### Admin workflow
+1. Open the deployed application or local frontend.
+2. Sign in with a staff ID and PIN provisioned for your environment.
+3. Allow camera access and complete face verification.
+4. Allow location access and wait for an accurate location reading.
+5. Submit check-in or check-out.
+6. If an attempt is rejected, read the displayed message and check the backend logs for the reason.
 
-1. Sign in with an account whose role is administrator.
+### Administrator workflow
+
+1. Sign in using an authorized administrator account.
 2. Open the staff management section.
-3. Create a staff account if needed.
-4. For an active staff member, select **Enroll face** and follow the camera prompt.
-5. Reset a PIN or activate/deactivate the account as needed.
-6. Use the dashboard and history section to review attendance information.
+3. Create a staff account if required.
+4. Enroll or update the staff member's face profile using the camera.
+5. Reset a PIN or activate/deactivate an account when needed.
+6. Review dashboard summaries and attendance history.
 
-### Administrator provisioning
+### API overview
 
-Automatic demo seeding is disabled in production. Administrators must be provisioned securely using the admin management CLI:
-
-```bash
-# Provision an administrator account
-python manage_admin.py --create --id YOUR_ADMIN_ID --pin YOUR_SECURE_PIN
-
-# To decommission or scramble old demo accounts
-python manage_admin.py --decommission-demo
-```
-
-Demo accounts (`ADM001` and `STF001`) are disabled by default in production.
-
-## API overview
-
-The API is implemented in `main.py`. The following endpoints are part of the current application flow; consult `/docs` for the exact request/response schemas and any additional routes.
+The backend exposes REST endpoints for health checks, login, face verification, attendance, and administrator operations. Common routes in the current project include:
 
 | Method | Endpoint | Purpose |
 |---|---|---|
-| `GET` | `/` | Root/API status response |
+| `GET` | `/` | API status |
 | `GET` | `/health` | Health check |
-| `POST` | `/auth/login` | Authenticate using staff ID and PIN; returns an auth token on success |
-| `POST` | `/face/verify` | Verify a face for the signed-in staff member and produce verification information/proof |
-| `POST` | `/attendance/check-in` | Record a check-in after required verification and location checks |
-| `POST` | `/attendance/check-out` | Record a check-out after required verification and location checks |
-| `POST` | `/admin/staff/{staff_id}/face` | Enroll/update a staff member's face profile (admin-only) |
+| `POST` | `/auth/login` | Staff/admin authentication |
+| `POST` | `/face/verify` | Face verification |
+| `POST` | `/attendance/check-in` | Check-in request |
+| `POST` | `/attendance/check-out` | Check-out request |
+| `POST` | `/admin/staff/{staff_id}/face` | Admin face enrollment/update |
 
-The backend also provides admin dashboard/staff management and attendance-history routes. Their exact paths may vary with the current `main.py`; use Swagger UI at `/docs` to inspect all registered endpoints.
+For exact request schemas and the full list of registered routes, start the backend and visit `/docs`.
 
-### Authentication
-
-Protected API calls use the bearer token returned by login. Include it in the request header:
+Protected requests use the bearer token returned by login:
 
 ```http
 Authorization: Bearer YOUR_ACCESS_TOKEN
 ```
 
-Do not share tokens or store them in public repositories. Admin routes should only be used by authenticated users with the administrator role.
+Never publish real tokens or credentials.
 
-## Attendance validation flow
+## 📱 Camera and Location Permissions
 
-A successful attendance request is expected to pass the checks implemented by the backend:
+CampusPass needs camera access for face verification and location access for geofence checks.
 
-1. **Authentication:** the token must be valid and identify an active staff account.
-2. **Face verification:** the staff member must complete the required face-verification step; attendance requests without the required proof can be rejected.
-3. **Location permission:** the browser must return GPS coordinates.
-4. **GPS accuracy:** the reported accuracy must meet the configured threshold. For example, if the limit is 50 metres, a reading with 151-metre accuracy is too imprecise.
-5. **Campus geofence:** the coordinates must be inside the configured campus radius.
-6. **Attendance rules:** the backend applies the check-in/check-out rules and records the result in the database.
+- Use **HTTPS** in deployed environments; modern browsers generally require a secure context for camera and geolocation access.
+- Allow camera and location permissions for the site.
+- On Android, check both browser site permissions and the phone's system-level location permission.
+- If GPS accuracy is poor, move to an open area and wait for the reading to stabilize.
+- Test the geofence near the configured campus area.
 
-GPS is an estimate, not a guarantee of physical presence. Indoor locations, browser permission settings, device hardware, and network conditions can affect accuracy. A location check alone should not be treated as strong proof of attendance.
+## 🧯 Troubleshooting
 
-## Security and privacy
+| Issue | What to check |
+|---|---|
+| Backend does not start | Check Python dependencies, environment variables, entry point, and hosting logs. |
+| Frontend cannot reach the API | Confirm API URL, backend status, CORS origins, and browser console errors. |
+| Database connection fails | Check Supabase status, credentials, schema, and required tables. |
+| Camera does not open | Check HTTPS/localhost, browser camera permission, and whether another app is using the camera. |
+| Location permission is denied | Check browser site settings and Android system permissions, then reload the page. |
+| GPS accuracy is too low | Move outdoors, wait for a better fix, and check the configured accuracy threshold. |
+| Attendance is rejected | Review the message and check account status, face verification, GPS accuracy, geofence settings, and attendance rules. |
+| Face enrollment fails | Confirm admin permissions, camera access, database schema, and backend logs. |
 
-- Use HTTPS outside local development.
-- Protect all admin endpoints with server-side role checks.
-- Store PINs as salted password hashes; never log or expose plain-text PINs.
-- Keep Supabase and JWT secrets on the backend only.
-- Apply least-privilege access and appropriate RLS policies.
-- Treat face data and attendance records as sensitive personal information. Collect only what is necessary, limit access, and define a retention/deletion policy.
-- Tell staff what face and location information is collected and why; obtain any consent or authorization required by applicable law and institutional policy.
-- Do not rely on client-side checks alone. Validate tokens, roles, face proofs, GPS accuracy, geofence distance, and attendance rules on the server.
-- Before deployment, review face matching/liveness protections, rate limiting, audit logs, backup/restore, and error messages for sensitive information.
+## 🔒 Security and Privacy
 
-## Troubleshooting
+- Keep Supabase secret keys and JWT secrets on the backend only.
+- Use HTTPS for deployed traffic.
+- Enforce administrator authorization on the server.
+- Store PINs as salted hashes, not plain text.
+- Treat face-related data, location data, and attendance records as sensitive.
+- Limit access to data and follow applicable institutional policies for consent, retention, and deletion.
+- Do not rely on client-side validation alone.
+- GPS and face verification can reduce some forms of misuse, but no single check guarantees that all spoofing or impersonation attempts will be prevented.
 
-### `POST /attendance/check-in` returns `400 Bad Request`
+## 👥 Meet the Team
 
-Read the response body shown in the frontend or backend logs. It may explain that the location is outside the campus area, GPS accuracy is insufficient, or required verification is missing. Fix the stated condition rather than repeatedly retrying the same request.
+CampusPass was built collaboratively for the **SKIT College Hackathon**. This project reflects the teamwork, creativity, problem-solving, and learning that happen when people work together to turn an idea into a working solution.
 
-### “Your GPS accuracy is too low”
+Add your teammates' names and profile links below so everyone receives proper credit.
 
-- Move near an open area or outdoors.
-- Wait for the browser to improve its location fix.
-- Ensure location permission is enabled for the site.
-- Confirm the configured accuracy threshold is suitable for your use case.
-- Test near the actual campus; testing from home should normally fail the campus geofence check.
+<table>
+  <tr>
+    <td align="center" width="33%">
+      <strong>Veer Pratap Singh</strong><br>
+      <sub>Backend + database</sub><br>
+      <a href="https://github.com/xyresiiic">GitHub Profile</a>
+    </td>
+    <td align="center" width="33%">
+      <strong>Suman Vyas</strong><br>
+      <sub>Research + Presentation</sub><br>
+      <em>-----</em>
+    </td>
+    <td align="center" width="33%">
+      <strong>Md. Touseef</strong><br>
+      <sub>Frontend + Testing</sub><br>
+      <em>-----</em>
+    </td>
+  </tr>
+</table>
 
-### Camera does not open
+A special thank-you to **SKIT College** for providing a platform to collaborate, innovate, and showcase our work.
 
-- Allow camera access in browser permissions.
-- Close other apps/tabs that may be using the camera.
-- Check that the page is running on `localhost` or HTTPS.
-- Verify the browser can access a camera and inspect the browser console for errors.
+## 🎯 What We Learned
 
-### Frontend cannot reach the backend
+- Building and connecting a frontend, backend, and hosted database.
+- Handling camera and location permissions in a browser.
+- Designing attendance workflows around identity and location checks.
+- Debugging API, database, and deployment issues.
+- Collaborating under hackathon time constraints and improving a project through testing.
 
-- Confirm Uvicorn is running on port `8100`.
-- Check that the API URL in the frontend is `http://127.0.0.1:8100`.
-- Ensure CORS allows the frontend origin, normally `http://127.0.0.1:5180`.
-- Check terminal logs and browser DevTools Network/Console tabs.
+## 📌 Project Information
 
-### Login or database errors
+- **Project:** CampusPass — Smart Campus Attendance System
+- **Event:** SKIT College Hackathon
+- **Frontend:** React + TypeScript + Vite
+- **Backend:** FastAPI
+- **Database:** Supabase PostgreSQL
+- **Repository:** [CampusPass-IGNITE](https://github.com/xyresiiic/CampusPass-IGNITE)
 
-- Confirm the `.env` file is loaded from the backend's working directory.
-- Verify `SUPABASE_URL` and the server-side secret key.
-- Confirm the required Supabase tables/columns exist.
-- Verify the account is active and its role/PIN are correct.
-- Restart the backend after changing environment variables.
+## 📄 License
 
-### Face enrollment fails
+under MIT Licence
 
-- Confirm the account is active and the signed-in user has admin permissions.
-- Allow camera access and ensure the video preview is working.
-- Check the API response and backend logs for the enrollment endpoint.
-- Confirm the face-profile table/schema expected by the backend is available.
+---
 
-## Development notes
+<div align="center">
 
-- Backend entry point: `main.py`.
-- Frontend entry point: `frontend/src/main.tsx`.
-- Main UI: `frontend/src/App.tsx` and `frontend/src/App.css`.
-- Local frontend: port `5180`.
-- Local backend: port `8100`.
-- API docs: `/docs`.
-- Keep frontend and backend running in separate terminals during development.
-- When adding or renaming endpoints, update this README and verify the request/response contracts in Swagger UI.
+**Built with 💙 by the CampusPass team at the SKIT College Hackathon.**
 
-## Future improvements
+[⬆ Back to top](#-campuspass)
 
-- Add automated tests for authentication, geofence validation, face enrollment, and attendance transitions.
-- Add database migrations and a documented seed-data script.
-- Add audit logs for administrative actions.
-- Add a clear face-enrollment status in the staff table.
-- Add exportable attendance reports and filters.
-- Add production deployment instructions, monitoring, backups, and restore testing.
-- Evaluate liveness detection and spoofing resistance for face verification.
-- Add a clear privacy notice and configurable retention policy for face and location data.
-
-## License
-
-No license has been specified yet. Add a `LICENSE` file and update this section before publishing or distributing the project.
+</div>
